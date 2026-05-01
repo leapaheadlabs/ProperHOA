@@ -12,9 +12,20 @@ const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 export async function POST(req: Request) {
   const payload = await req.text();
   const signature = headers().get("stripe-signature");
+  const idempotencyKey = headers().get("idempotency-key") || "";
 
   if (!signature) {
     return NextResponse.json({ error: "Missing signature" }, { status: 400 });
+  }
+
+  // Idempotency: check if this event was already processed
+  if (idempotencyKey) {
+    const existing = await prisma.activityLog.findFirst({
+      where: { entityType: "stripe_event", entityId: idempotencyKey },
+    });
+    if (existing) {
+      return NextResponse.json({ received: true, idempotency: true });
+    }
   }
 
   let event: Stripe.Event;
@@ -23,10 +34,28 @@ export async function POST(req: Request) {
     event = stripe.webhooks.constructEvent(payload, signature, webhookSecret);
   } catch (err: any) {
     console.error("Webhook signature verification failed:", err.message);
+    await prisma.activityLog.create({
+      data: {
+        action: "Stripe webhook verification failed",
+        entityType: "stripe_event",
+        entityId: "unknown",
+        details: { error: err.message },
+      },
+    });
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
   try {
+    // Log event receipt for PCI audit trail
+    await prisma.activityLog.create({
+      data: {
+        action: "Stripe webhook received",
+        entityType: "stripe_event",
+        entityId: event.id,
+        details: { type: event.type, idempotencyKey },
+      },
+    });
+
     switch (event.type) {
       case "payment_intent.succeeded": {
         const paymentIntent = event.data.object as Stripe.PaymentIntent;
