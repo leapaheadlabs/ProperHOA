@@ -1,0 +1,102 @@
+{
+  "dashboard": {
+    "title": "ProperHOA Application Dashboard",
+    "tags": ["properhoa", "app"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "Active Users",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "properhoa_users_total",
+            "legendFormat": "Total Users"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+      },
+      {
+        "title": "Communities",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "properhoa_communities_total",
+            "legendFormat": "Communities"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 }
+      },
+      {
+        "title": "Transactions",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "properhoa_transactions_total",
+            "legendFormat": "Transactions"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 }
+      },
+      {
+        "title": "Violations",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "properhoa_violations_total",
+            "legendFormat": "Violations"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
+      },
+      {
+        "title": "HTTP Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total[5m])",
+            "legendFormat": "{{method}} {{status}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 }
+      },
+      {
+        "title": "Response Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 }
+      },
+      {
+        "title": "Database Connections",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "pg_stat_activity_count",
+            "legendFormat": "Connections"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 }
+      },
+      {
+        "title": "Redis Operations",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "redis_commands_processed_total",
+            "legendFormat": "Commands"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s"
+  }
+}
