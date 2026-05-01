@@ -1,7 +1,21 @@
-import NextAuth from "next-auth";
+import NextAuth, { type DefaultSession } from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import Google from "next-auth/providers/google";
 import { prisma } from "./prisma";
+
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id: string;
+      communityId?: string;
+      role?: string;
+    } & DefaultSession["user"];
+  }
+  interface User {
+    communityId?: string;
+    role?: string;
+  }
+}
 
 export const {
   handlers: { GET, POST },
