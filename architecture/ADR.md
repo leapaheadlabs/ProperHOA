@@ -1,308 +1,379 @@
-# ProperHOA — Architecture Decision Record (ADR)
+# ProperHOA — Architecture Decision Record (ADR) v1.1
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-05-01  
 **Author:** Command (OpenClaw)  
-**Status:** APPROVED — Product Owner confirmed Vercel + Supabase + Design System constraints  
+**Status:** APPROVED — Product Owner confirmed self-hosted-first, Stripe exception only  
 
 ---
 
-## 1. Architecture Overview
+## 1. Philosophy
+
+> We self-host everything we legally and technically can. The only exceptions are services that require banking partnerships, PCI DSS Level 1 infrastructure, or financial regulator contracts that would take years and millions to replicate. Stripe stays because building a card processor is insane. Everything else runs on our metal.
+
+---
+
+## 2. Architecture Overview
 
 ```
-Client (Web/iOS/Android)
-    → TLS 1.3
-    → Vercel Edge Network (CDN + WAF)
-    → Next.js App Router / API Routes
-    → Supabase Auth (JWT)
-    → Row-Level Security (RLS)
-    → Supabase PostgreSQL / Realtime / Storage
-    ↓
-    → Vercel AI SDK + OpenAI GPT-4o (Edge Functions)
-    → Pinecone (Vector DB for RAG)
-    → Stripe (Payments)
-    → Plaid (Bank Sync)
+Users (Web / iOS / Android)
+    → Cloudflare (DNS + CDN + DDoS — free tier)
+    → Caddy Reverse Proxy (auto HTTPS, Let's Encrypt)
+    → Docker Compose Stack on VPS
+        ├── Next.js App (web + API)
+        ├── PostgreSQL 16 + pgvector (database + vectors)
+        ├── Redis (cache + rate limiting + sessions)
+        ├── MinIO (file storage, S3-compatible)
+        ├── Meilisearch (full-text search)
+        ├── Ollama (LLM inference, self-hosted AI)
+        ├── Socket.io Server (realtime WebSockets)
+        └── Grafana + Prometheus + Loki (monitoring)
+    → Stripe (card tokenization only — unavoidable)
 ```
 
 ---
 
-## 2. Technology Stack
+## 3. Technology Stack
 
-| Layer | Technology | Rationale |
-|-------|-----------|-----------|
-| **Frontend (Web)** | Next.js 14+ (App Router) | Vercel-native, SSR/SSG, React ecosystem |
-| **Frontend (Mobile)** | Expo + React Native | Single codebase iOS/Android, shares React logic with web |
-| **API / Backend** | Next.js API Routes + Edge Functions | Colocated with frontend, zero cold start on Vercel |
-| **Database** | Supabase PostgreSQL | Managed Postgres, RLS, realtime subscriptions |
-| **Auth** | Supabase Auth | Built-in JWT, OAuth, MFA, session management |
-| **Realtime** | Supabase Realtime | Native WebSocket, no extra vendor |
-| **File Storage** | Supabase Storage | S3-compatible, signed URLs, image transforms |
-| **Search** | Supabase Full-Text + Pinecone | Postgres tsvector for documents, Pinecone for semantic/AI |
-| **AI** | Vercel AI SDK + OpenAI GPT-4o | Streaming UI, RAG pipeline, tool calling |
-| **Vector DB** | Pinecone | Low-latency semantic search, metadata filtering |
-| **Payments** | Stripe + Plaid | Stripe for dues, Plaid for bank sync |
-| **Hosting** | Vercel | Edge network, preview deployments, zero-config CI/CD |
-| **Design System** | Radix UI + Tailwind CSS + shadcn/ui | Accessible primitives, custom theming |
+### 3.1 Fully Self-Hosted
+
+| Layer | Technology | Why |
+|-------|-----------|-----|
+| **Host** | Hetzner CX51 / DigitalOcean 4GB / Linode 4GB | $20-40/mo, 4 vCPU, 16GB RAM, 160GB NVMe |
+| **Reverse Proxy** | Caddy v2 | Auto HTTPS, dead simple config, HTTP/3, rate limiting |
+| **Container Orchestration** | Docker Compose | Simple, reproducible, no Kubernetes complexity needed |
+| **Web Frontend** | Next.js 14 (App Router) | React ecosystem, SSR/SSG, file-based routing |
+| **API / Backend** | Next.js API Routes (same container) | Colocated, no separate backend repo |
+| **Database** | PostgreSQL 16 + **pgvector** | Industry standard, pgvector = vectors in same DB |
+| **Auth** | **NextAuth.js v5** + PostgreSQL adapter | Self-hosted sessions, OAuth providers, email magic links |
+| **File Storage** | **MinIO** | S3-compatible API, self-hosted, signed URLs, buckets per community |
+| **Full-Text Search** | **Meilisearch** | Self-hosted, typo-tolerant, faceted search, <50ms queries |
+| **Semantic / Vector Search** | **pgvector** (same PostgreSQL) | Store embeddings alongside relational data, single query for hybrid search |
+| **AI / LLM** | **Ollama** — Llama 3.1 8B or Mistral 7B | Runs locally, zero API costs, no data leaves the server |
+| **Embeddings** | **nomic-embed-text** via Ollama | 768-dim embeddings, runs on CPU instantly |
+| **Realtime** | **Socket.io** | WebSocket pub/sub, presence, rooms per community |
+| **Cache / Sessions / Rate Limit** | **Redis** | Key eviction, TTL, atomic counters |
+| **Email** | **Nodemailer** + SMTP (Postfix or cheap relay) | Self-hosted or AWS SES relay at $0.10/1K |
+| **Monitoring** | **Grafana + Prometheus + Loki** | Metrics, logs, alerts, dashboards |
+| **CI/CD** | **GitHub Actions** → VPS deploy via SSH + Docker | No managed CI/CD vendor needed |
+| **Backup** | **Restic** or **pgBackRest** | Encrypted backups to S3-compatible storage (MinIO or B2) |
+
+### 3.2 The One Unavoidable Managed Service
+
+| Service | What We Use Them For | What We DON'T Use Them For |
+|---------|----------------------|---------------------------|
+| **Stripe** | Card tokenization, PCI-compliant payment processing | We store ALL invoice, payment, and homeowner data in OUR database. Stripe only sees tokens. |
+
+**Why Stripe stays:**
+- Building a card processor requires PCI DSS Level 1 certification ($500K+), banking partnerships, fraud detection ML, chargeback handling, and regulatory compliance in all 50 states.
+- Stripe Elements puts the card form in an iframe on Stripe's domain. Our servers never touch raw card numbers. We only store the Stripe customer ID and payment method tokens.
+- This is the minimal possible dependency.
+
+### 3.3 Phase 2 Optional Services
+
+| Service | Use Case | Self-Hosted Alternative | Decision |
+|---------|----------|------------------------|----------|
+| **Plaid** | Automatic bank transaction sync | Manual CSV/OFX/QFX file import + smart reconciliation UI | **Skip for MVP.** Manual import satisfies 80% of treasurers. Plaid can be added later as optional integration. |
+| **Twilio** | SMS notifications | Email-to-SMS gateway (free for most US carriers) or skip SMS | **Skip for MVP.** Email + push notifications sufficient. |
 
 ---
 
-## 3. Key Architecture Decisions
+## 4. Key Architecture Decisions
 
-### ADR-001: Next.js + Vercel for Full-Stack
+### ADR-101: VPS + Docker Compose Over Kubernetes
 
-**Decision:** Use Next.js App Router with API Routes on Vercel for both web UI and backend API.
+**Decision:** Single VPS running Docker Compose, not Kubernetes cluster.
 
 **Rationale:**
-- Single codebase for frontend and API
-- Vercel edge network provides <50ms latency globally
-- Serverless functions auto-scale, zero ops overhead
-- Preview deployments per PR = rapid iteration
+- 10-100 home HOAs = low concurrent user count. A single 4-core/16GB VPS handles 500+ concurrent users easily.
+- Docker Compose is simpler to reason about, debug, and recover.
+- Horizontal scaling (k8s) is premature optimization for MVP. We can migrate later if needed.
+- Restic backups + Docker volumes = easy disaster recovery.
 
 **Trade-offs:**
-- Function execution limits (60s hobby, 300s pro) — mitigated by Supabase Edge Functions for long-running tasks
-- Cold starts rare on Vercel but possible — mitigated by Edge Functions for AI/chat
+- Single point of failure — mitigated by nightly backups, database replication to secondary VPS for warm standby
+- No auto-scaling — mitigated by VPS upgrade path (Hetzner CX51 → CPX41 → CPX51)
 
 ---
 
-### ADR-002: Supabase as Backend Platform
+### ADR-102: PostgreSQL + pgvector for All Data Including Vectors
 
-**Decision:** Use Supabase for database, auth, realtime, and storage.
+**Decision:** Use a single PostgreSQL instance with pgvector extension for both relational data AND vector embeddings.
 
 **Rationale:**
-- Managed PostgreSQL with RLS = built-in multi-tenancy
-- Realtime subscriptions out of the box
-- Auth with OAuth, MFA, passwordless
-- Storage with signed URLs and image transforms
-- Same vendor = unified billing
+- One database to backup, replicate, and monitor.
+- Hybrid search in a single query: `SELECT * FROM documents WHERE community_id = 'x' ORDER BY embedding <-> query_vec LIMIT 5;`
+- No network hop to separate vector database = lower latency.
+- pgvector supports HNSW indexes for fast approximate nearest neighbor search at scale.
 
 **Trade-offs:**
-- Vendor lock-in — mitigated by standard PostgreSQL (can migrate)
-- Realtime connection limits — mitigated by connection pooling
+- PostgreSQL is not purpose-built for vectors — mitigated by HNSW index + reasonable embedding count (~10K per community = trivial)
 
 ---
 
-### ADR-003: Expo + React Native for Mobile
+### ADR-103: Ollama for Self-Hosted AI
 
-**Decision:** Use Expo (managed workflow) with React Native for iOS and Android.
-
-**Rationale:**
-- Shared business logic with Next.js web app
-- OTA updates without App Store review
-- Expo SDK provides camera, push notifications, filesystem
-- Faster to MVP than native Swift/Kotlin
-
-**Alternative considered:** Flutter — rejected due to team's React expertise and desire to share code with web.
-
----
-
-### ADR-004: Vercel AI SDK + OpenAI for AI Assistant
-
-**Decision:** Use Vercel AI SDK with OpenAI GPT-4o (gpt-4o-mini for cost-sensitive ops).
+**Decision:** Run Ollama on the same VPS (or a dedicated inference box) with Llama 3.1 8B or Mistral 7B.
 
 **Rationale:**
-- Vercel AI SDK provides streaming UI components
-- Built-in RAG support
-- Tool calling for actions ("schedule meeting", "create violation")
-- OpenAI leads on speed/price for GPT-4o class
+- Zero per-request costs. One-time GPU cost or CPU inference.
+- No data leaves our server. Homeowner questions, CC&Rs, and bylaws never touch a third-party API.
+- Ollama provides model management (pull, switch, quantize) via simple CLI.
+- Llama 3.1 8B is competitive with GPT-3.5 for FAQ-style question answering. Fine-tuning on community docs improves accuracy.
 
 **Architecture:**
 ```
-Homeowner Question
-    → Vercel Edge Function
-    → Retrieve relevant docs from Pinecone (RAG, filtered by community_id)
-    → OpenAI GPT-4o with system prompt + context
-    → Stream response back to user
-    → Log interaction for refinement
+Homeowner asks: "When is trash pickup?"
+    → Next.js API
+    → pgvector RAG: SELECT content FROM document_chunks 
+                     WHERE community_id = '...' 
+                     ORDER BY embedding <-> query_embedding LIMIT 5;
+    → POST to Ollama localhost:11434/api/generate
+      { model: "llama3.1", prompt: "Context: [...] Question: When is trash pickup?", stream: true }
+    → Stream response back via Server-Sent Events
+    → Log interaction to PostgreSQL
 ```
+
+**Hardware Options:**
+
+| Setup | Cost | Response Time | Notes |
+|-------|------|---------------|-------|
+| CPU only (VPS 4-core/16GB) | $0 extra | 8-15 sec | Llama 3.1 8B Q4_K_M, acceptable for MVP |
+| GPU instance (NVIDIA T4) | +$40-80/mo | 2-4 sec | Rent from Vast.ai or Lambda Labs |
+| Dedicated inference box | $600 one-time | 1-2 sec | RTX 3060 12GB in home/office, no monthly cost |
+| Apple Silicon Mac Mini M2 | $600 one-time | 1-2 sec | 16GB unified memory, whisper-quiet, runs Ollama perfectly |
+
+**Recommendation for MVP:** CPU inference on the VPS. Upgrade to GPU when you have 50+ active communities and the latency complaints start.
+
+---
+
+### ADR-104: NextAuth.js v5 Over Supabase Auth
+
+**Decision:** Use NextAuth.js v5 (Auth.js) with the PostgreSQL adapter for session management.
+
+**Rationale:**
+- Fully self-hosted. No external auth service.
+- Supports OAuth (Google, Apple), email magic links, credentials (password), and custom providers.
+- Session data stored in our PostgreSQL = queryable, auditable, ours.
+- No vendor lock-in. Can swap adapters without touching user data.
 
 **Trade-offs:**
-- OpenAI dependency — mitigated by fallback to Claude via AWS Bedrock
-- Cost at scale — mitigated by caching common responses, using gpt-4o-mini for 80% of queries
+- Need to implement email verification, password reset, MFA ourselves — mitigated by Auth.js built-in flows + community packages
+- No built-in Realtime/Websocket auth integration — mitigated by Socket.io + session cookie validation
 
 ---
 
-### ADR-005: Pinecone for Vector Search
+### ADR-105: MinIO Over S3 / Supabase Storage
 
-**Decision:** Use Pinecone as dedicated vector database for semantic document search.
+**Decision:** Use MinIO as self-hosted S3-compatible object storage.
 
 **Rationale:**
-- Purpose-built for vector search (vs pgvector which is slower at scale)
-- Hybrid search (keyword + semantic) out of the box
-- Metadata filtering (by community_id, document type, date range)
-- Serverless tier = pay per query, scales to zero
-
-**Data Flow:**
-```
-Document Upload (CC&R, Bylaw)
-    → Supabase Storage
-    → Trigger: Supabase Edge Function
-    → Parse text (PDF/DOCX → text)
-    → Chunk + embed via OpenAI text-embedding-3-small
-    → Upsert to Pinecone (with community_id metadata)
-```
+- Drop-in S3 API replacement. Libraries built for AWS S3 work with MinIO with zero code changes.
+- Buckets per community for logical isolation.
+- Signed URL generation for secure file access.
+- Image transforms via MinIO's built-in capabilities or Sharp (Node.js) on the server.
 
 ---
 
-### ADR-006: Stripe + Plaid for Payments & Accounting
+### ADR-106: Meilisearch Over Algolia / Typesense
 
-**Decision:** Use Stripe for payment processing and Plaid for bank account sync.
+**Decision:** Use Meilisearch for full-text search across documents, announcements, and directory.
 
 **Rationale:**
-- Stripe = industry standard for recurring billing, invoicing, autopay
-- Stripe Elements = pre-built, PCI-compliant UI components
-- Plaid = connects to 12,000+ financial institutions for automatic transaction import
-
-**Flow:**
-```
-Dues Invoice Created
-    → Stripe generates invoice + payment link
-    → Homeowner pays via Stripe (card/ACH)
-    → Webhook updates Supabase (payment status)
-    → Plaid syncs bank transactions nightly
-    → Treasurer sees reconciled books
-```
+- Self-hosted, single binary, low memory footprint.
+- Typo-tolerant, faceted, and fast (<50ms).
+- Simple REST API. Can be queried directly from frontend for public data.
+- Replaces both Supabase full-text search and Algolia/Typesense.
 
 ---
 
-### ADR-007: Multi-Tenancy via Row-Level Security
+### ADR-107: Socket.io Over Supabase Realtime
 
-**Decision:** Implement multi-tenancy using PostgreSQL RLS with community_id as the tenant discriminator.
+**Decision:** Use Socket.io server for WebSocket realtime updates.
 
 **Rationale:**
-- True data isolation at the database level
-- Supabase RLS policies are declarative and enforceable
-- Single database = simpler ops, shared resources = lower cost
+- Self-hosted, no external realtime service.
+- Room-based subscriptions (per community, per meeting).
+- Presence tracking (who's online in a meeting).
+- Falls back to HTTP long-polling if WebSocket blocked.
 
-**RLS Policy Example:**
-```sql
-CREATE POLICY "Users can only see their community's data"
-ON homeowners
-FOR ALL
-USING (community_id = (
-    SELECT community_id FROM users WHERE id = auth.uid()
-));
+**Events:**
+- `community:<id>:announcement` — New announcement posted
+- `community:<id>:violation` — Violation status changed
+- `meeting:<id>:agenda` — Live agenda updates during meeting
+- `meeting:<id>:vote` — Live vote tally
+
+---
+
+### ADR-108: Manual Bank Import Over Plaid (MVP)
+
+**Decision:** Skip Plaid for MVP. Implement CSV/OFX/QFX file import with smart reconciliation UI.
+
+**Rationale:**
+- Plaid is a managed service with per-connection costs.
+- 80% of small HOA treasurers are comfortable downloading a CSV from their bank and uploading it.
+- Smart reconciliation = auto-match transactions to invoices based on amount + date proximity.
+- Plaid can be added later as an optional paid integration for communities that want auto-sync.
+
+**Import Flow:**
+```
+Treasurer downloads CSV from bank
+    → Upload to ProperHOA
+    → Parse CSV (date, description, amount, balance)
+    → Auto-categorize based on description patterns
+    → Suggest matches to existing invoices/payments
+    → Treasurer confirms matches, marks unmatched items
+    → Reconciliation complete
 ```
 
 ---
 
-## 4. Database Schema (Summary)
+## 5. Database Schema (Summary)
 
-See `database-schema.md` for full schema with indexes, constraints, and RLS policies.
+See `database-schema.md` for full schema. Key change from v1.0: `auth.users` table replaced by NextAuth.js session/users schema, but all application tables remain identical. pgvector extension adds `vector(768)` type for embeddings.
 
-**Core Tables:**
-- `communities` — Tenant root
-- `users` — Board members & homeowners (Supabase Auth users extended)
-- `homes` — Individual properties within a community
-- `documents` — CC&Rs, bylaws, minutes, contracts
-- `meetings` — Scheduled meetings, agendas, minutes
-- `violations` — Violation reports, status, photos
-- `arc_requests` — Architectural review requests
-- `invoices` — Dues, special assessments, fines
-- `payments` — Payment records linked to Stripe
-- `transactions` — Bank transactions synced via Plaid
-- `announcements` — Community-wide communications
-- `compliance_items` — Filing deadlines, insurance renewals, etc.
+**Tables:** communities, users, homes, documents, document_chunks (with vector embedding column), meetings, violations, arc_requests, invoices, payments, transactions, bank_accounts, announcements, compliance_items, maintenance_requests, chat_sessions, activity_logs.
 
 ---
 
-## 5. API Design
+## 6. API Design
 
-See `api-spec.md` for full OpenAPI-style specification.
-
-**Pattern:** Next.js API Routes with app/api/ colocated handlers.
-**Auth:** JWT from Supabase Auth, passed as Authorization: Bearer <token>.
-**Key Endpoints:**
-- POST /api/chat — AI assistant (streaming)
-- GET /api/documents — List/search documents
-- POST /api/violations — Create violation report
-- GET /api/meetings — List meetings
-- POST /api/payments — Initiate payment (Stripe)
-- GET /api/accounting/summary — Financial dashboard data
-- GET /api/compliance — Upcoming deadlines
+See `api-spec.md`. Key changes from v1.0:
+- Auth: NextAuth.js session cookie + JWT instead of Supabase JWT
+- Realtime: Socket.io events instead of Supabase Realtime subscriptions
+- AI: POST to `/api/ai/generate` streams from Ollama instead of OpenAI
+- File uploads: MinIO presigned URLs instead of Supabase Storage
 
 ---
 
-## 6. Security Model
+## 7. Security Model
 
-See `security-model.md` for full security architecture.
-
-**Layers:**
-1. Transport: TLS 1.3 everywhere
-2. Auth: Supabase Auth (JWT, OAuth, MFA)
-3. Authorization: RLS policies per table + API middleware
-4. Data: Encrypted at rest (Supabase AES-256), encrypted in transit
-5. Payments: Stripe Elements (PCI DSS scope reduction), never touch raw card data
-6. AI: No PII in AI prompts, RAG context scoped to community
+See `security-model.md`. Key changes:
+- Data encryption at rest: LUKS full-disk encryption on VPS + PostgreSQL transparent data encryption (if needed)
+- Auth: Bcrypt password hashing (NextAuth.js default) + Argon2 option
+- No external AI data leakage: All prompts stay on our server
+- Stripe scope: Minimal PCI SAQ A (iframe tokenization only)
 
 ---
 
-## 7. Deployment Architecture
+## 8. Deployment Architecture
 
 ```
 Developer Push
     → GitHub
-    → GitHub Actions (test, lint, typecheck)
-    → Vercel Preview Deployment (per PR)
-    → Merge to main
-    → Vercel Production Deployment
-    → Supabase Migrations Applied
-    → Edge Functions Deployed
+    → GitHub Actions (test, lint, typecheck, build Docker image)
+    → Docker image pushed to GitHub Container Registry (free)
+    → SSH to VPS + docker-compose pull + docker-compose up -d
+    → Database migrations run via Prisma Migrate or custom SQL
+    → Zero-downtime deploy via Caddy health checks + Docker restart
 ```
 
 **Environments:**
-- production — Live app, Supabase prod project
-- staging — Mirror of prod, Supabase staging project
-- preview — Per-PR deployment, ephemeral database
+- **production** — Live VPS, live domain
+- **staging** — Second cheap VPS or Docker on local machine
+- **local** — Docker Compose on developer machine (identical to prod)
 
 ---
 
-## 8. Compliance Roadmap
+## 9. Monitoring & Observability
+
+| Tool | Purpose | Access |
+|------|---------|--------|
+| **Grafana** | Dashboards for all metrics | https://grafana.properhoa.com (auth required) |
+| **Prometheus** | Metrics collection | Internal only |
+| **Loki** | Log aggregation | Grafana integration |
+| **Node Exporter** | VPS CPU, memory, disk metrics | Prometheus target |
+| **cAdvisor** | Docker container metrics | Prometheus target |
+| **Uptime Kuma** | External uptime monitoring | Checks API every 60 seconds |
+
+**Alerts (via Grafana Alerting → Email/Discord):**
+- API response time >500ms for 5 minutes
+- PostgreSQL connections >80% of max
+- Disk usage >80%
+- Ollama model not responding
+- Backup failure
+
+---
+
+## 10. Backup & Disaster Recovery
+
+| Data | Method | Frequency | Retention |
+|------|--------|-----------|-----------|
+| PostgreSQL | pg_dump + Restic to B2/MinIO | Daily | 30 days |
+| MinIO objects | MinIO bucket replication | Realtime | 30 days |
+| Ollama models | Tarball to B2 | Monthly | 2 versions |
+| Configuration | Git repo + encrypted secrets | Every deploy | Git history |
+
+**Recovery Time Objective (RTO):** 4 hours  
+**Recovery Point Objective (RPO):** 24 hours (daily backups)
+
+**Warm Standby:**
+- Secondary cheap VPS ($10/mo) with streaming PostgreSQL replication
+- In production failure, promote standby + update DNS = <30 min recovery
+
+---
+
+## 11. Compliance Roadmap
 
 | Compliance | Target | Approach |
 |------------|--------|----------|
-| PCI DSS | Month 3 | Stripe Elements (SAQ A), never store card data |
-| SOC 2 Type I | Month 9 | Vanta/Drata automation, policies, evidence |
-| SOC 2 Type II | Month 15 | 6-month observation period |
-| GDPR/CCPA | Month 3 | Data retention policies, export/delete APIs, consent |
-| State-specific | Ongoing | Modular compliance engine, state templates |
+| **PCI DSS** | Month 3 | Stripe Elements (SAQ A), no card data touches our servers |
+| **SOC 2 Type I** | Month 9 | Vanta/Drata (can still use their platform for evidence, just self-hosted infra) |
+| **SOC 2 Type II** | Month 15 | 6-month observation period |
+| **GDPR/CCPA** | Month 3 | Data retention policies, export/delete APIs, consent management |
+| **State-specific** | Ongoing | Modular compliance engine, state templates |
 
 ---
 
-## 9. Performance Targets
+## 12. Cost Model (Month 6 Projection)
 
-| Metric | Target | Strategy |
-|--------|--------|----------|
-| API response (p95) | <200ms | Edge caching, connection pooling, optimized queries |
-| AI response (first token) | <500ms | Edge Functions, streaming, cached embeddings |
-| Page load (LCP) | <2s | Next.js SSR/SSG, image optimization, Vercel Edge |
-| Mobile app launch | <3s | Hermes, code splitting, lazy loading |
-| Uptime | 99.9% | Vercel + Supabase SLA, health checks, alerting |
+| Item | Monthly Cost | Notes |
+|------|-------------|-------|
+| Primary VPS (Hetzner CX51) | $20 | 4 vCPU, 16GB RAM, 160GB NVMe |
+| Backup VPS / Warm Standby | $10 | 2 vCPU, 4GB RAM |
+| Domain + Cloudflare | $0 | Cloudflare free tier |
+| Backblaze B2 (backups) | ~$2 | ~50GB stored |
+| Stripe | Variable | 2.9% + 30¢ per transaction only |
+| **Total Fixed** | **~$32/mo** | |
 
----
-
-## 10. Cost Model (Month 6 Projection)
-
-| Service | Tier | Est. Monthly |
-|---------|------|-------------|
-| Vercel Pro | Team plan | $40 |
-| Supabase Pro | 8GB compute, 100GB storage | $25 |
-| Pinecone Serverless | ~1M vectors | $25 |
-| OpenAI API | ~50K requests/month | $50 |
-| Stripe | 2.9% + 30¢ per transaction | Variable |
-| Plaid | Production | ~$100 |
-| Postmark / Resend | ~10K emails | $10 |
-| Sentry | Team plan | $26 |
-| Twilio | ~500 SMS | $5 |
-| **Total Fixed** | | **~$180/mo** |
+**Optional upgrades:**
+- GPU instance for AI: +$40-80/mo (when needed)
+- Dedicated inference box: $600 one-time
 
 ---
 
-## 11. Open Questions
+## 13. What We Own vs. What We Rent
 
-1. Background Jobs: Use Supabase Edge Functions + queues, or Vercel Cron + Edge Functions? (Decision: Supabase pg_cron + Edge Functions)
-2. Push Notifications: Expo Push (free) vs OneSignal vs Firebase? (Decision: Expo Push for MVP, Firebase for scale)
-3. Document Parsing: AWS Textract vs self-hosted Tika vs Supabase function? (Decision: Supabase Edge Function + pdf-parse)
-4. Caching: Vercel KV vs Upstash Redis vs Supabase? (Decision: Upstash Redis for AI cache + rate limiting)
+| Category | What We Own | What We Rent (Unavoidable) |
+|----------|-------------|---------------------------|
+| **Compute** | VPS hardware (rented, but we control the stack) | N/A |
+| **Database** | PostgreSQL, pgvector, all data | N/A |
+| **Auth** | NextAuth.js, session store, passwords | N/A |
+| **Storage** | MinIO, all files | N/A |
+| **AI** | Ollama, Llama weights, prompts, embeddings | N/A |
+| **Search** | Meilisearch index | N/A |
+| **Monitoring** | Grafana, Prometheus, logs | N/A |
+| **Payments** | Invoice data, homeowner data, payment records | Stripe tokenization only |
+| **Bank Sync** | Reconciliation UI, import logic | N/A (manual import) |
+
+**Data Sovereignty:** 99.9% of user data never leaves infrastructure we control.
+
+---
+
+## 14. Migration Path from Managed to Self-Hosted
+
+If we ever need to migrate FROM a managed service TO self-hosted:
+
+| From | To | Effort |
+|------|-----|--------|
+| Supabase PostgreSQL | Self-hosted PostgreSQL | Low — pg_dump / pg_restore |
+| Supabase Auth | NextAuth.js + PostgreSQL | Medium — user migration script, password reset required |
+| Supabase Storage | MinIO | Low — S3-compatible, copy objects |
+| OpenAI | Ollama | Low — swap API endpoint, same prompt format |
+| Pinecone | pgvector | Medium — export vectors, create HNSW index |
+| Vercel | VPS + Docker | Medium — Dockerize Next.js, Caddy config |
+
+**We're building on the destination architecture from day one. No migration needed.**
 
 ---
 

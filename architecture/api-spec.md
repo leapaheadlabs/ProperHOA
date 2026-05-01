@@ -1,34 +1,48 @@
-# ProperHOA — API Specification
+# ProperHOA — API Specification v1.1 (Self-Hosted)
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-05-01  
-**Base URL:** https://api.properhoa.com (production) / https://api-staging.properhoa.com  
-**Protocol:** REST + WebSocket (Supabase Realtime)  
-**Auth:** JWT Bearer (Authorization: Bearer <supabase_jwt>)  
-**Content-Type:** application/json  
+**Base URL:** `https://api.properhoa.com` (production) / `https://api-staging.properhoa.com`  
+**Protocol:** REST + WebSocket (Socket.io)  
+**Auth:** Session cookie (NextAuth.js) or JWT Bearer (`Authorization: Bearer <token>`)  
+**Content-Type:** `application/json`  
 
 ---
 
 ## 1. Authentication
 
-All endpoints require a valid Supabase JWT token in the Authorization header.
+### 1.1 Session-Based (Web)
+
+NextAuth.js v5 session cookie:
+
+```http
+Cookie: next-auth.session-token=eyJhbGciOiJIUzI1NiIs...
+```
+
+### 1.2 JWT Bearer (Mobile / API Clients)
+
+For mobile apps and programmatic API access:
 
 ```http
 Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 ```
 
 The JWT contains:
-- sub — user UUID
-- community_id — user's community (custom claim)
-- role — user role (custom claim)
+- `sub` — app_user UUID
+- `community_id` — user's community
+- `role` — app_role (president, treasurer, etc.)
+- `exp` — expiry
 
-**Token Refresh:** Handled automatically by Supabase client libraries.
+### 1.3 Token Refresh
+
+- Web: Automatic via NextAuth.js session refresh
+- Mobile: POST `/api/auth/refresh` with refresh token
 
 ---
 
 ## 2. Response Format
 
-### Standard Success Response
+### Success
 
 ```json
 {
@@ -42,7 +56,7 @@ The JWT contains:
 }
 ```
 
-### Standard Error Response
+### Error
 
 ```json
 {
@@ -74,11 +88,11 @@ The JWT contains:
 
 ## 3. Core Endpoints
 
-### 3.1 AI Assistant
+### 3.1 AI Assistant (Ollama)
 
-#### POST /api/chat
+#### `POST /api/ai/chat`
 
-Initiates a streaming chat session with the AI Board Assistant.
+Initiates a streaming chat session with the self-hosted AI Board Assistant.
 
 **Request:**
 ```json
@@ -94,48 +108,56 @@ Initiates a streaming chat session with the AI Board Assistant.
 
 **Response (Streaming — SSE):**
 ```
+event: token
 data: {"token": "Trash"}
+
+event: token
 data: {"token": " pickup"}
+
+event: token
 data: {"token": " is"}
-data: {"token": " every"}
-data: {"token": " Tuesday"}
-data: {"done": true, "session_id": "uuid", "sources": [{"doc": "Rules & Regulations", "page": 4}]}
+
+event: done
+data: {"session_id": "uuid", "sources": [{"doc": "Rules & Regulations", "page": 4}]}
+```
+
+**Backend Flow:**
+```
+POST /api/ai/chat
+    → Validate user session
+    → Set RLS context (community_id, role)
+    → Generate embedding via Ollama (nomic-embed-text)
+    → pgvector RAG query:
+       SELECT content, document_id, metadata
+       FROM document_chunks
+       WHERE community_id = '...'
+       ORDER BY embedding <=> query_embedding
+       LIMIT 5;
+    → Build prompt: "Context: [chunks...] Question: [message]"
+    → POST to Ollama localhost:11434/api/generate
+    → Stream response back via SSE
+    → Log to chat_sessions table
 ```
 
 **Error Codes:**
-- AI_RATE_LIMITED — Too many requests (429)
-- AI_CONTEXT_TOO_LARGE — Document context exceeded (413)
-- AI_UNAVAILABLE — OpenAI service error (503)
+- `AI_RATE_LIMITED` — Too many requests (429)
+- `AI_CONTEXT_TOO_LARGE` — Document context exceeded (413)
+- `AI_UNAVAILABLE` — Ollama not responding (503)
 
 ---
 
-#### GET /api/chat/sessions
+#### `GET /api/ai/sessions`
 
 List user's chat history.
 
 **Query Params:**
-- limit — default 20, max 100
-- offset — default 0
-- session_type — optional filter
-
-**Response:**
-```json
-{
-  "data": [
-    {
-      "id": "uuid",
-      "session_type": "general",
-      "summary": "Trash pickup schedule inquiry",
-      "resolved": true,
-      "created_at": "2026-05-01T14:30:00Z"
-    }
-  ]
-}
-```
+- `limit` — default 20, max 100
+- `offset` — default 0
+- `session_type` — optional filter
 
 ---
 
-#### POST /api/chat/:session_id/feedback
+#### `POST /api/ai/:session_id/feedback`
 
 Rate AI response quality.
 
@@ -151,16 +173,16 @@ Rate AI response quality.
 
 ### 3.2 Documents
 
-#### GET /api/documents
+#### `GET /api/documents`
 
 List community documents.
 
 **Query Params:**
-- type — filter by document type
-- is_public — true/false
-- search — full-text search query
-- sort — created_at | title | updated_at
-- order — asc | desc
+- `type` — filter by document type
+- `is_public` — true/false
+- `search` — full-text search query (passed to Meilisearch)
+- `sort` — `created_at` | `title` | `updated_at`
+- `order` — `asc` | `desc`
 
 **Response:**
 ```json
@@ -170,7 +192,7 @@ List community documents.
       "id": "uuid",
       "title": "CC&Rs - Original",
       "type": "ccr",
-      "file_url": "https://storage.properhoa.com/...",
+      "file_url": "https://properhoa.com/api/documents/uuid/download?token=signed",
       "file_size": 245000,
       "is_public": true,
       "uploaded_by": { "id": "uuid", "first_name": "Jane", "last_name": "Smith" },
@@ -185,7 +207,7 @@ List community documents.
 
 ---
 
-#### POST /api/documents
+#### `POST /api/documents`
 
 Upload a new document.
 
@@ -198,90 +220,45 @@ is_public: false
 expires_at: "2027-01-01"
 ```
 
-**Response:**
-```json
-{
-  "data": {
-    "id": "uuid",
-    "title": "Insurance Policy 2026",
-    "file_url": "https://storage.properhoa.com/...",
-    "uploaded_by": { "id": "uuid", "first_name": "Jane" },
-    "created_at": "2026-05-01T14:30:00Z"
-  }
-}
-```
-
 **Process:**
 1. Validate file (max 50MB, allowed types: pdf, doc, docx, jpg, png)
-2. Upload to Supabase Storage
-3. Extract text via Edge Function (PDF/DOCX parsing)
-4. Chunk + embed text → Pinecone
-5. Return document metadata
+2. Upload to MinIO (bucket: `communities/{community_id}/documents/`)
+3. Extract text via Node.js (pdf-parse, mammoth)
+4. Chunk text (500-1000 chars with overlap)
+5. Generate embeddings via Ollama (nomic-embed-text)
+6. Store chunks in `document_chunks` with pgvector embedding
+7. Sync to Meilisearch for full-text search
+8. Return document metadata
 
 ---
 
-#### GET /api/documents/:id
+#### `GET /api/documents/:id/download`
 
-Get document details + download URL.
-
-**Response:**
-```json
-{
-  "data": {
-    "id": "uuid",
-    "title": "CC&Rs",
-    "file_url": "https://storage.properhoa.com/...?token=signed",
-    "content_preview": "These Covenants, Conditions, and Restrictions...",
-    "metadata": { "pages": 24, "word_count": 8500 }
-  }
-}
-```
+Get signed download URL (redirect to MinIO presigned URL).
 
 ---
 
-#### DELETE /api/documents/:id
+#### `DELETE /api/documents/:id`
 
-Soft delete (archives, doesn't remove from storage immediately).
+Soft delete (archives, removes from Meilisearch index).
 
 ---
 
 ### 3.3 Meetings
 
-#### GET /api/meetings
+#### `GET /api/meetings`
 
 List meetings.
 
 **Query Params:**
-- status — scheduled | completed | cancelled
-- from_date — ISO date
-- to_date — ISO date
-- type — regular | special | annual
-
-**Response:**
-```json
-{
-  "data": [
-    {
-      "id": "uuid",
-      "title": "Monthly Board Meeting - May",
-      "type": "regular",
-      "scheduled_at": "2026-05-15T19:00:00Z",
-      "location": "Community Clubhouse",
-      "status": "scheduled",
-      "agenda": [
-        { "order": 1, "item": "Call to Order", "duration_min": 5 },
-        { "order": 2, "item": "Treasurer's Report", "duration_min": 15 }
-      ],
-      "attendee_count": 5,
-      "created_by": { "first_name": "Jane", "last_name": "Smith" }
-    }
-  ]
-}
-```
+- `status` — scheduled | completed | cancelled
+- `from_date` — ISO date
+- `to_date` — ISO date
+- `type` — regular | special | annual
 
 ---
 
-#### POST /api/meetings
+#### `POST /api/meetings`
 
 Create a meeting.
 
@@ -295,29 +272,32 @@ Create a meeting.
   "agenda": [
     { "order": 1, "item": "Call to Order", "duration_min": 5 },
     { "order": 2, "item": "Review Violations", "duration_min": 20 }
-  ]
+  ],
+  "auto_generate_agenda": false
 }
 ```
 
 **Smart Agenda Feature:**
-If auto_generate_agenda: true, the AI will:
+If `auto_generate_agenda: true`:
 1. Pull open action items from previous meeting
 2. Add pending violations requiring review
 3. Include pending ARC requests
 4. Add standard items (treasurer report, old business)
+5. Format as ordered agenda items
 
 ---
 
-#### POST /api/meetings/:id/start
+#### `POST /api/meetings/:id/start`
 
-Mark meeting as in-progress. Triggers:
-- Realtime broadcast to attendees
-- Timer tracking begins
-- Minutes template loaded
+Mark meeting as in-progress.
+
+**Triggers Socket.io events:**
+- `meeting:{id}:started` — Broadcast to all community members
+- Realtime agenda updates enabled
 
 ---
 
-#### POST /api/meetings/:id/minutes
+#### `POST /api/meetings/:id/minutes`
 
 Publish meeting minutes.
 
@@ -330,51 +310,31 @@ Publish meeting minutes.
   ],
   "action_items": [
     { "task": "Get fence repair quote", "assigned_to": "uuid", "due_date": "2026-05-30" }
-  ]
+  ],
+  "auto_publish": true
 }
 ```
 
-**Auto-publish:** If auto_publish: true, minutes are formatted and emailed to all homeowners.
+**Auto-publish:** If `auto_publish: true`, minutes emailed to all homeowners via Nodemailer.
 
 ---
 
 ### 3.4 Violations
 
-#### GET /api/violations
+#### `GET /api/violations`
 
 List violations with filters.
 
 **Query Params:**
-- status — open | acknowledged | in_review | resolved | escalated
-- priority — low | normal | high | urgent
-- home_id — filter by property
-- type — parking | noise | trash | landscaping | pet | architectural
-- sort — created_at | due_date | priority
-
-**Response:**
-```json
-{
-  "data": [
-    {
-      "id": "uuid",
-      "home": { "unit_number": "12", "address": "123 Main St" },
-      "type": "trash",
-      "description": "Trash cans left out past collection day",
-      "photos": ["https://storage.../photo1.jpg"],
-      "status": "open",
-      "priority": "normal",
-      "due_date": "2026-05-08",
-      "days_open": 3,
-      "reminder_count": 1,
-      "reported_by": { "first_name": "Jane" }
-    }
-  ]
-}
-```
+- `status` — open | acknowledged | in_review | resolved | escalated
+- `priority` — low | normal | high | urgent
+- `home_id` — filter by property
+- `type` — parking | noise | trash | landscaping | pet | architectural
+- `sort` — `created_at` | `due_date` | `priority`
 
 ---
 
-#### POST /api/violations
+#### `POST /api/violations`
 
 Create a violation report.
 
@@ -388,60 +348,32 @@ priority: "normal"
 due_date: "2026-05-08"
 ```
 
-**Auto-escalation:**
-If violation is not resolved by due_date:
+**Auto-escalation (background job via pg_cron or BullMQ + Redis):**
 - Day 1: Email reminder to homeowner
 - Day 3: Second reminder + board notification
 - Day 7: Auto-escalate to "escalated" status + fine notice
 
 ---
 
-#### POST /api/violations/:id/resolve
+#### `POST /api/violations/:id/resolve`
 
 Mark violation as resolved.
-
-**Request:**
-```json
-{
-  "resolution_notes": "Homeowner corrected issue",
-  "fine_amount": 0
-}
-```
 
 ---
 
 ### 3.5 ARC (Architectural Review)
 
-#### GET /api/arc-requests
+#### `GET /api/arc-requests`
 
 List architectural review requests.
 
 **Query Params:**
-- status — submitted | under_review | approved | denied | withdrawn
-- home_id — filter by property
-
-**Response:**
-```json
-{
-  "data": [
-    {
-      "id": "uuid",
-      "home": { "unit_number": "15" },
-      "project_type": "fence",
-      "description": "6-foot privacy fence along back property line",
-      "documents": ["https://storage.../plans.pdf"],
-      "status": "under_review",
-      "review_deadline": "2026-05-22",
-      "days_remaining": 15,
-      "votes": { "yes": 2, "no": 0, "pending": 3 }
-    }
-  ]
-}
-```
+- `status` — submitted | under_review | approved | denied | withdrawn
+- `home_id` — filter by property
 
 ---
 
-#### POST /api/arc-requests/:id/vote
+#### `POST /api/arc-requests/:id/vote`
 
 Board member votes on ARC request.
 
@@ -454,44 +386,22 @@ Board member votes on ARC request.
 }
 ```
 
-**Auto-approval:** If auto_approve: true and all board members have voted, status auto-updates.
-
 ---
 
 ### 3.6 Payments & Invoicing
 
-#### GET /api/invoices
+#### `GET /api/invoices`
 
 List invoices.
 
 **Query Params:**
-- status — outstanding | paid | overdue | partial
-- home_id — filter by property
-- type — dues | special_assessment | fine
-
-**Response:**
-```json
-{
-  "data": [
-    {
-      "id": "uuid",
-      "invoice_number": "2026-0042",
-      "home": { "unit_number": "12" },
-      "type": "dues",
-      "amount": 150.00,
-      "balance_due": 150.00,
-      "due_at": "2026-05-01",
-      "status": "overdue",
-      "days_overdue": 5,
-      "late_fee_applied": false
-    }
-  ]
-}
-```
+- `status` — outstanding | paid | overdue | partial
+- `home_id` — filter by property
+- `type` — dues | special_assessment | fine
 
 ---
 
-#### POST /api/invoices
+#### `POST /api/invoices`
 
 Create an invoice (board only).
 
@@ -507,13 +417,13 @@ Create an invoice (board only).
 ```
 
 **Auto-actions:**
-- Stripe invoice created automatically
-- Email notification sent to homeowner
+- Stripe invoice created via API
+- Email notification sent to homeowner via Nodemailer
 - Added to compliance calendar if recurring
 
 ---
 
-#### POST /api/payments
+#### `POST /api/payments`
 
 Initiate a payment.
 
@@ -541,28 +451,19 @@ Initiate a payment.
 1. Create Stripe PaymentIntent
 2. Return client_secret to frontend
 3. Frontend uses Stripe Elements to confirm
-4. Webhook updates invoice status on success
+4. Stripe webhook updates invoice status on success
 
 ---
 
-#### POST /api/payments/setup-autopay
+#### `POST /api/payments/setup-autopay`
 
 Set up automatic recurring payments.
 
-**Request:**
-```json
-{
-  "home_id": "uuid",
-  "payment_method_id": "pm_...",
-  "start_date": "2026-06-01"
-}
-```
-
 ---
 
-### 3.7 Accounting
+### 3.7 Accounting (Manual Bank Import)
 
-#### GET /api/accounting/summary
+#### `GET /api/accounting/summary`
 
 Financial dashboard data.
 
@@ -589,21 +490,36 @@ Financial dashboard data.
 
 ---
 
-#### GET /api/accounting/transactions
+#### `POST /api/accounting/import`
 
-Bank transactions (Plaid sync).
+Upload bank statement for import.
 
-**Query Params:**
-- from_date — ISO date
-- to_date — ISO date
-- category — filter by category
-- reconciled — true/false
+**Request (multipart/form-data):**
+```
+bank_account_id: "uuid"
+file: <CSV or OFX file>
+format: "csv"
+```
+
+**Process:**
+1. Parse CSV/OFX headers and rows
+2. Validate date format, amounts, required columns
+3. Create `import_batch` record
+4. Insert transactions into `transactions` table
+5. Auto-suggest matches to existing invoices
+6. Return summary: { imported: 45, matched: 38, errors: 2 }
 
 ---
 
-#### POST /api/accounting/transactions/:id/reconcile
+#### `GET /api/accounting/import/:batch_id`
 
-Match a bank transaction to an invoice/bill.
+Get import status and details.
+
+---
+
+#### `POST /api/accounting/transactions/:id/reconcile`
+
+Match a bank transaction to an invoice.
 
 **Request:**
 ```json
@@ -615,40 +531,27 @@ Match a bank transaction to an invoice/bill.
 
 ---
 
-### 3.8 Compliance
+#### `GET /api/accounting/transactions`
 
-#### GET /api/compliance
+Bank transactions (imported via CSV/OFX).
 
-Upcoming compliance deadlines.
-
-**Response:**
-```json
-{
-  "data": [
-    {
-      "id": "uuid",
-      "type": "insurance_renewal",
-      "title": "General Liability Insurance Renewal",
-      "due_date": "2026-06-15",
-      "days_remaining": 45,
-      "status": "upcoming",
-      "reminder_days": 30
-    },
-    {
-      "id": "uuid",
-      "type": "tax_filing",
-      "title": "Annual Tax Filing (Form 1120-H)",
-      "due_date": "2026-05-15",
-      "days_remaining": 14,
-      "status": "due_soon"
-    }
-  ]
-}
-```
+**Query Params:**
+- `from_date` — ISO date
+- `to_date` — ISO date
+- `category` — filter by category
+- `reconciled` — true/false
 
 ---
 
-#### POST /api/compliance/:id/complete
+### 3.8 Compliance
+
+#### `GET /api/compliance`
+
+Upcoming compliance deadlines.
+
+---
+
+#### `POST /api/compliance/:id/complete`
 
 Mark compliance item as complete.
 
@@ -658,24 +561,24 @@ document: <binary proof file>
 notes: "Renewed with State Farm, policy #12345"
 ```
 
-**Auto-action:** If recurring: true, auto-creates next year's item.
+**Auto-action:** If `recurring: true`, auto-creates next year's item.
 
 ---
 
 ### 3.9 Announcements
 
-#### GET /api/announcements
+#### `GET /api/announcements`
 
 List announcements.
 
 **Query Params:**
-- type — general | urgent | meeting_reminder | payment_reminder
-- target_audience — all | board_only | homeowners
-- is_pinned — true/false
+- `type` — general | urgent | meeting_reminder | payment_reminder
+- `target_audience` — all | board_only | homeowners
+- `is_pinned` — true/false
 
 ---
 
-#### POST /api/announcements
+#### `POST /api/announcements`
 
 Create announcement (board only).
 
@@ -693,43 +596,29 @@ Create announcement (board only).
 ```
 
 **Auto-actions:**
-- Push notification to target audience
-- Email broadcast
-- SMS for urgent types
+- Socket.io broadcast to target audience
+- Email broadcast via Nodemailer
+- Web Push notifications (if subscribed)
 
 ---
 
 ### 3.10 Maintenance
 
-#### GET /api/maintenance
+#### `GET /api/maintenance`
 
 List maintenance requests.
 
-**Query Params:**
-- status — open | assigned | in_progress | completed
-- priority — low | normal | high | urgent
-- assigned_to — filter by assignee
-
 ---
 
-#### POST /api/maintenance
+#### `POST /api/maintenance`
 
 Create maintenance request.
-
-**Request (multipart/form-data):**
-```
-title: "Leaking faucet in unit 12"
-description: "Kitchen sink faucet dripping constantly"
-photos[]: <binary>
-category: "plumbing"
-priority: "normal"
-```
 
 ---
 
 ### 3.11 Users & Community
 
-#### GET /api/users/me
+#### `GET /api/users/me`
 
 Current user profile.
 
@@ -750,8 +639,8 @@ Current user profile.
     "home": { "unit_number": "15" },
     "notification_prefs": {
       "email": true,
-      "sms": true,
-      "push": true
+      "push": true,
+      "sms": false
     }
   }
 }
@@ -759,77 +648,89 @@ Current user profile.
 
 ---
 
-#### GET /api/community
+#### `GET /api/community`
 
 Community details + stats.
 
-**Response:**
-```json
-{
-  "data": {
-    "id": "uuid",
-    "name": "Oakwood Estates",
-    "total_homes": 45,
-    "active_homeowners": 42,
-    "board_members": 5,
-    "monthly_dues": 150.00,
-    "current_balance": 12500.00,
-    "open_violations": 3,
-    "upcoming_meetings": 1,
-    "overdue_invoices": 5,
-    "compliance_deadlines": 2
-  }
-}
-```
-
 ---
 
-#### GET /api/community/directory
+#### `GET /api/community/directory`
 
 Resident directory (opt-in only).
 
-**Response:**
+---
+
+### 3.12 Push Notifications
+
+#### `POST /api/push/subscribe`
+
+Register Web Push subscription.
+
+**Request:**
 ```json
 {
-  "data": [
-    {
-      "home": { "unit_number": "12" },
-      "owner_name": "John Doe",
-      "email": "john@example.com",
-      "phone": "+1-555-123-4567",
-      "is_rented": false
-    }
-  ]
+  "endpoint": "https://fcm.googleapis.com/...",
+  "keys": {
+    "p256dh": "...",
+    "auth": "..."
+  },
+  "device_info": { "browser": "Chrome", "os": "Android" }
 }
 ```
 
 ---
 
-## 4. Realtime Events (WebSocket)
+#### `POST /api/push/unsubscribe`
 
-Subscribe via Supabase Realtime:
-
-```javascript
-const channel = supabase
-  .channel('community:' + communityId)
-  .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, callback)
-  .on('postgres_changes', { event: '*', schema: 'public', table: 'violations' }, callback)
-  .on('postgres_changes', { event: '*', schema: 'public', table: 'meetings' }, callback)
-  .subscribe();
-```
-
-**Broadcast Channels:**
-- community:<id> — All community events
-- meeting:<id> — Live meeting updates (agenda changes, votes)
-- user:<id> — Personal notifications
+Remove push subscription.
 
 ---
 
-## 5. Rate Limiting
+## 4. Realtime Events (Socket.io)
+
+**Connection:** `wss://api.properhoa.com/socket.io`
+
+**Authentication:** JWT token passed in connection handshake:
+```javascript
+const socket = io('wss://api.properhoa.com', {
+  auth: { token: 'jwt-token' }
+});
+```
+
+### 4.1 Community Room
+
+```javascript
+socket.emit('join_community', communityId);
+
+socket.on('announcement', (data) => { ... });
+socket.on('violation_update', (data) => { ... });
+socket.on('meeting_scheduled', (data) => { ... });
+```
+
+### 4.2 Meeting Room (Live Meeting)
+
+```javascript
+socket.emit('join_meeting', meetingId);
+
+socket.on('agenda_updated', (data) => { ... });
+socket.on('vote_cast', (data) => { ... });
+socket.on('attendee_joined', (data) => { ... });
+```
+
+### 4.3 Personal Notifications
+
+```javascript
+socket.on('notification', (data) => { ... });
+```
+
+---
+
+## 5. Rate Limiting (Redis)
 
 | Endpoint Category | Limit | Window |
 |-------------------|-------|--------|
 | General API | 100 | 1 minute |
+| Auth (login/register) | 10 | 1 minute |
 | AI Chat | 10 | 1 minute |
 | File Uploads | 10 | 1 minute |
 | Payment Operations | 30 | 1 minute |
@@ -847,35 +748,54 @@ X-RateLimit-Reset: 1714587600
 
 ### 6.1 Stripe Webhooks
 
-**Endpoint:** POST /api/webhooks/stripe
+**Endpoint:** `POST /api/webhooks/stripe`
 
 **Events Handled:**
-- invoice.payment_succeeded → Mark invoice as paid
-- invoice.payment_failed → Mark invoice as failed, notify homeowner
-- customer.subscription.updated → Update community plan
-- charge.refunded → Handle refund
+- `invoice.payment_succeeded` → Mark invoice as paid
+- `invoice.payment_failed` → Mark invoice as failed, notify homeowner
+- `customer.subscription.updated` → Update community plan
+- `charge.refunded` → Handle refund
 
-### 6.2 Plaid Webhooks
-
-**Endpoint:** POST /api/webhooks/plaid
-
-**Events Handled:**
-- TRANSACTIONS_SYNC → Sync new bank transactions
-- PENDING_EXPIRATION → Alert on pending transactions
+**Verification:** Stripe signature validation required.
 
 ---
 
 ## 7. Mobile API Notes
 
-The mobile app (Expo/React Native) uses the same API as the web app. Differences:
+The mobile app (Expo/React Native) uses the same API as the web app.
 
-1. Push Notifications: Register device token via POST /api/push/register
-2. File Uploads: Use expo-image-picker + multipart upload
-3. Offline Support: Cache key data via SQLite + sync on reconnect
-4. Deep Links: properhoa://community/:slug/meeting/:id
+**Differences:**
+1. **Push Notifications:** Register Web Push token via `POST /api/push/subscribe` (or native Expo Push if using Expo Notifications)
+2. **File Uploads:** Use `expo-image-picker` + multipart upload
+3. **Offline Support:** Cache key data via SQLite + sync on reconnect
+4. **Deep Links:** `properhoa://community/:slug/meeting/:id`
+5. **Auth:** JWT Bearer instead of session cookie (mobile can't reliably use httpOnly cookies)
 
 ---
 
-*API designed for ProperHOA v1.0 MVP*  
-*REST + Realtime + Streaming AI*  
-*Supabase Auth + RLS for security*
+## 8. Meilisearch Integration
+
+Documents are synced to Meilisearch for full-text search:
+
+```javascript
+// On document creation/update
+documentsIndex.addDocuments({
+  id: document.id,
+  title: document.title,
+  content: document.content_text,
+  type: document.type,
+  community_id: document.community_id,
+  is_public: document.is_public,
+  updated_at: document.updated_at
+});
+```
+
+**Search endpoint:** `GET /api/search?q=trash+pickup&type=rule`
+
+**Meilisearch filters:** `community_id = '...' AND (is_public = true OR role IN ('president', ...))`
+
+---
+
+*API designed for ProperHOA v1.1 — Self-Hosted Edition*  
+*REST + Socket.io + Streaming AI via Ollama*  
+*NextAuth.js + RLS for security*
