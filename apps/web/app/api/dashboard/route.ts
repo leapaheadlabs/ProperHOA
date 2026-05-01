@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getCached, setCache, invalidateCache, cacheKey } from "@/lib/cache";
 
 export const GET = auth(async (req) => {
   if (!req.auth?.user?.id || !req.auth?.user?.communityId) {
@@ -8,6 +9,13 @@ export const GET = auth(async (req) => {
   }
 
   const communityId = req.auth.user.communityId;
+  const cacheKeyName = cacheKey("dashboard", communityId);
+
+  // Try cache first (30 seconds for dashboard)
+  const cached = await getCached(cacheKeyName);
+  if (cached) {
+    return NextResponse.json(cached);
+  }
 
   try {
     // Stats
@@ -57,7 +65,7 @@ export const GET = auth(async (req) => {
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json({
+    const result = {
       stats: {
         totalHomes,
         openViolations,
@@ -74,7 +82,12 @@ export const GET = auth(async (req) => {
         meetings: todaysMeetings,
       },
       recentActivity,
-    });
+    };
+
+    // Cache for 30 seconds
+    await setCache(cacheKeyName, result, 30);
+
+    return NextResponse.json(result);
   } catch (error: any) {
     console.error("Dashboard stats error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

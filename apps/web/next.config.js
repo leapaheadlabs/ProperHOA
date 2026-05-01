@@ -14,6 +14,14 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ['@aws-sdk/client-s3'],
   },
+  // Performance optimizations
+  compress: true,
+  poweredByHeader: false,
+  generateEtags: true,
+  onDemandEntries: {
+    maxInactiveAge: 60 * 60 * 1000,
+    pagesBufferLength: 5,
+  },
 }
 
 module.exports = nextConfig
