@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { invalidateCache } from "@/lib/cache";
 
 export const POST = auth(async (req) => {
   if (!req.auth?.user?.id || !req.auth?.user?.communityId) {
@@ -40,6 +41,9 @@ export const POST = auth(async (req) => {
         details: { type, priority, homeId },
       },
     });
+
+    // Invalidate dashboard cache
+    await invalidateCache(`dashboard:${communityId}*`);
 
     return NextResponse.json({ violation }, { status: 201 });
   } catch (error: any) {
