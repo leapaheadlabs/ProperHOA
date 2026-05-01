@@ -1,15 +1,15 @@
-# ProperHOA — Architecture Decision Record (ADR) v1.1
+# ProperHOA — Architecture Decision Record (ADR) v1.2
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-05-01  
 **Author:** Command (OpenClaw)  
-**Status:** APPROVED — Product Owner confirmed self-hosted-first, Stripe exception only  
+**Status:** APPROVED — Product Owner confirmed self-hosted-first + Stripe + Plaid as core dependencies  
 
 ---
 
 ## 1. Philosophy
 
-> We self-host everything we legally and technically can. The only exceptions are services that require banking partnerships, PCI DSS Level 1 infrastructure, or financial regulator contracts that would take years and millions to replicate. Stripe stays because building a card processor is insane. Everything else runs on our metal.
+> We self-host everything we legally and technically can. The only exceptions are services that require banking partnerships, PCI DSS Level 1 infrastructure, or financial regulator contracts that would take years and millions to replicate. Stripe and Plaid stay because building a card processor or bank data aggregator is insane. Everything else runs on our metal.
 
 ---
 
@@ -29,6 +29,7 @@ Users (Web / iOS / Android)
         ├── Socket.io Server (realtime WebSockets)
         └── Grafana + Prometheus + Loki (monitoring)
     → Stripe (card tokenization only — unavoidable)
+    → Plaid (bank transaction sync — Month 3-4 integration)
 ```
 
 ---
@@ -58,23 +59,22 @@ Users (Web / iOS / Android)
 | **CI/CD** | **GitHub Actions** → VPS deploy via SSH + Docker | No managed CI/CD vendor needed |
 | **Backup** | **Restic** or **pgBackRest** | Encrypted backups to S3-compatible storage (MinIO or B2) |
 
-### 3.2 The One Unavoidable Managed Service
+### 3.2 Core External Services (Unavoidable)
 
 | Service | What We Use Them For | What We DON'T Use Them For |
 |---------|----------------------|---------------------------|
 | **Stripe** | Card tokenization, PCI-compliant payment processing | We store ALL invoice, payment, and homeowner data in OUR database. Stripe only sees tokens. |
+| **Plaid** | Automatic bank transaction sync from 12,000+ financial institutions | We store ALL transaction categorization, reconciliation logic, and reporting in OUR database. Plaid only delivers raw transaction data. |
 
 **Why Stripe stays:**
 - Building a card processor requires PCI DSS Level 1 certification ($500K+), banking partnerships, fraud detection ML, chargeback handling, and regulatory compliance in all 50 states.
 - Stripe Elements puts the card form in an iframe on Stripe's domain. Our servers never touch raw card numbers. We only store the Stripe customer ID and payment method tokens.
-- This is the minimal possible dependency.
 
-### 3.3 Phase 2 Optional Services
-
-| Service | Use Case | Self-Hosted Alternative | Decision |
-|---------|----------|------------------------|----------|
-| **Plaid** | Automatic bank transaction sync | Manual CSV/OFX/QFX file import + smart reconciliation UI | **Skip for MVP.** Manual import satisfies 80% of treasurers. Plaid can be added later as optional integration. |
-| **Twilio** | SMS notifications | Email-to-SMS gateway (free for most US carriers) or skip SMS | **Skip for MVP.** Email + push notifications sufficient. |
+**Why Plaid stays:**
+- Bank APIs are fragmented, heavily regulated, and require individual contracts with each financial institution.
+- Plaid provides unified access to 12,000+ banks via a single integration.
+- This is a **major selling point** for treasurers — automatic bank sync turns "vibes into ROI talk."
+- We store all transaction categorization, reconciliation logic, and financial reporting ourselves. Plaid only delivers raw data.
 
 ---
 
@@ -205,54 +205,102 @@ Homeowner asks: "When is trash pickup?"
 
 ---
 
-### ADR-108: Manual Bank Import Over Plaid (MVP)
+### ADR-108: Plaid Integration (Month 3-4)
 
-**Decision:** Skip Plaid for MVP. Implement CSV/OFX/QFX file import with smart reconciliation UI.
+**Decision:** Integrate Plaid for automatic bank transaction sync by Month 3-4.
 
 **Rationale:**
-- Plaid is a managed service with per-connection costs.
-- 80% of small HOA treasurers are comfortable downloading a CSV from their bank and uploading it.
-- Smart reconciliation = auto-match transactions to invoices based on amount + date proximity.
-- Plaid can be added later as an optional paid integration for communities that want auto-sync.
+- This is a **major selling point** for the treasurer persona.
+- Automatic transaction import eliminates manual CSV downloads and imports.
+- Real-time balance tracking and reconciliation suggestions.
+- Plaid delivers raw data; we own all categorization, reconciliation, and reporting logic.
 
-**Import Flow:**
+**Integration Timeline:**
+- **Month 1-2 (MVP):** Manual CSV/OFX import with smart reconciliation UI
+- **Month 3-4:** Add Plaid Link + webhooks for automatic sync
+- **Month 5+:** Multi-account support, investment account tracking
+
+**Data Flow:**
 ```
-Treasurer downloads CSV from bank
-    → Upload to ProperHOA
-    → Parse CSV (date, description, amount, balance)
+Treasurer connects bank account
+    → Plaid Link (client-side, no credentials touch our server)
+    → Plaid access token returned
+    → Encrypt token, store in PostgreSQL
+    → Nightly cron job calls Plaid /transactions/get
+    → New transactions inserted into our transactions table
     → Auto-categorize based on description patterns
-    → Suggest matches to existing invoices/payments
-    → Treasurer confirms matches, marks unmatched items
-    → Reconciliation complete
+    → Suggest matches to existing invoices
+    → Treasurer reviews and confirms
 ```
+
+**Security:**
+- Plaid access tokens encrypted at application level before storage (AES-256-GCM)
+- Token rotation every 90 days
+- Webhook signature verification on all Plaid callbacks
+- No bank credentials ever touch our servers (Plaid Link handles this)
 
 ---
 
 ## 5. Database Schema (Summary)
 
-See `database-schema.md` for full schema. Key change from v1.0: `auth.users` table replaced by NextAuth.js session/users schema, but all application tables remain identical. pgvector extension adds `vector(768)` type for embeddings.
+See `database-schema.md` for full schema with indexes, constraints, and RLS policies.
 
-**Tables:** communities, users, homes, documents, document_chunks (with vector embedding column), meetings, violations, arc_requests, invoices, payments, transactions, bank_accounts, announcements, compliance_items, maintenance_requests, chat_sessions, activity_logs.
+**Core Tables:**
+- `communities` — Tenant root
+- `users` (NextAuth.js) — Auth users
+- `app_users` — Extended profiles with roles
+- `homes` — Properties
+- `documents` — CC&Rs, bylaws, minutes, contracts
+- `document_chunks` — Vector embeddings for RAG
+- `meetings` — Scheduled meetings, agendas, minutes
+- `violations` — Violation reports, status, photos
+- `arc_requests` — Architectural review requests
+- `invoices` — Dues, special assessments, fines
+- `payments` — Payment records linked to Stripe
+- `transactions` — Bank transactions (manual import + Plaid sync)
+- `import_batches` — CSV/OFX upload tracking
+- `bank_accounts` — Connected accounts (Plaid-linked or manual)
+- `announcements` — Community-wide communications
+- `compliance_items` — Filing deadlines, insurance renewals, etc.
+- `maintenance_requests` — Work orders
+- `chat_sessions` — AI chat history
+- `activity_logs` — Audit trail
+- `push_subscriptions` — Web Push notifications
 
 ---
 
 ## 6. API Design
 
-See `api-spec.md`. Key changes from v1.0:
-- Auth: NextAuth.js session cookie + JWT instead of Supabase JWT
-- Realtime: Socket.io events instead of Supabase Realtime subscriptions
-- AI: POST to `/api/ai/generate` streams from Ollama instead of OpenAI
-- File uploads: MinIO presigned URLs instead of Supabase Storage
+See `api-spec.md` for full OpenAPI-style specification.
+
+**Pattern:** Next.js API Routes with `app/api/` colocated handlers.
+**Auth:** NextAuth.js session cookie + JWT for mobile.
+**Key Endpoints:**
+- `POST /api/ai/chat` — AI assistant (streaming from Ollama)
+- `GET /api/documents` — List/search documents (Meilisearch + pgvector)
+- `POST /api/violations` — Create violation report
+- `GET /api/meetings` — List meetings
+- `POST /api/payments` — Initiate payment (Stripe)
+- `GET /api/accounting/summary` — Financial dashboard data
+- `POST /api/accounting/import` — CSV/OFX bank import
+- `POST /api/plaid/connect` — Initiate Plaid Link
+- `POST /api/plaid/sync` — Trigger manual Plaid sync
+- `GET /api/compliance` — Upcoming deadlines
 
 ---
 
 ## 7. Security Model
 
-See `security-model.md`. Key changes:
-- Data encryption at rest: LUKS full-disk encryption on VPS + PostgreSQL transparent data encryption (if needed)
-- Auth: Bcrypt password hashing (NextAuth.js default) + Argon2 option
-- No external AI data leakage: All prompts stay on our server
-- Stripe scope: Minimal PCI SAQ A (iframe tokenization only)
+See `security-model.md` for full security architecture.
+
+**Layers:**
+1. Transport: TLS 1.3 everywhere (Caddy auto-HTTPS)
+2. Auth: NextAuth.js (JWT, OAuth, MFA)
+3. Authorization: RLS policies per table + API middleware
+4. Data: LUKS full-disk encryption + PostgreSQL at rest
+5. Payments: Stripe Elements (PCI DSS scope reduction), never touch raw card data
+6. Bank Sync: Plaid tokens encrypted at app level, no credentials touch our servers
+7. AI: No PII in prompts, RAG context scoped to community, all inference on our metal
 
 ---
 
@@ -264,7 +312,7 @@ Developer Push
     → GitHub Actions (test, lint, typecheck, build Docker image)
     → Docker image pushed to GitHub Container Registry (free)
     → SSH to VPS + docker-compose pull + docker-compose up -d
-    → Database migrations run via Prisma Migrate or custom SQL
+    → Database migrations run via Prisma Migrate
     → Zero-downtime deploy via Caddy health checks + Docker restart
 ```
 
@@ -292,6 +340,7 @@ Developer Push
 - Disk usage >80%
 - Ollama model not responding
 - Backup failure
+- Plaid sync failure (if enabled)
 
 ---
 
@@ -318,9 +367,9 @@ Developer Push
 | Compliance | Target | Approach |
 |------------|--------|----------|
 | **PCI DSS** | Month 3 | Stripe Elements (SAQ A), no card data touches our servers |
-| **SOC 2 Type I** | Month 9 | Vanta/Drata (can still use their platform for evidence, just self-hosted infra) |
+| **SOC 2 Type I** | Month 9 | Evidence collection on self-hosted infra |
 | **SOC 2 Type II** | Month 15 | 6-month observation period |
-| **GDPR/CCPA** | Month 3 | Data retention policies, export/delete APIs, consent management |
+| **GDPR/CCPA** | Month 3 | Data retention policies, export/delete APIs, consent |
 | **State-specific** | Ongoing | Modular compliance engine, state templates |
 
 ---
@@ -333,8 +382,9 @@ Developer Push
 | Backup VPS / Warm Standby | $10 | 2 vCPU, 4GB RAM |
 | Domain + Cloudflare | $0 | Cloudflare free tier |
 | Backblaze B2 (backups) | ~$2 | ~50GB stored |
-| Stripe | Variable | 2.9% + 30¢ per transaction only |
-| **Total Fixed** | **~$32/mo** | |
+| Stripe | Variable | 2.9% + 30¢ per transaction |
+| Plaid | ~$100-150 | Production tier, per-account pricing |
+| **Total Fixed** | **~$132-182/mo** | |
 
 **Optional upgrades:**
 - GPU instance for AI: +$40-80/mo (when needed)
@@ -354,9 +404,9 @@ Developer Push
 | **Search** | Meilisearch index | N/A |
 | **Monitoring** | Grafana, Prometheus, logs | N/A |
 | **Payments** | Invoice data, homeowner data, payment records | Stripe tokenization only |
-| **Bank Sync** | Reconciliation UI, import logic | N/A (manual import) |
+| **Bank Sync** | Transaction categorization, reconciliation, reporting | Plaid raw data delivery |
 
-**Data Sovereignty:** 99.9% of user data never leaves infrastructure we control.
+**Data Sovereignty:** 99% of user data never leaves infrastructure we control.
 
 ---
 
@@ -374,6 +424,35 @@ If we ever need to migrate FROM a managed service TO self-hosted:
 | Vercel | VPS + Docker | Medium — Dockerize Next.js, Caddy config |
 
 **We're building on the destination architecture from day one. No migration needed.**
+
+---
+
+## 15. Phase 1 vs Phase 2 Features
+
+### Phase 1 (Months 1-2): MVP
+
+| Feature | Stack | Status |
+|---------|-------|--------|
+| Web app (Next.js) | Self-hosted | Core |
+| Mobile app (Expo) | Self-hosted | Core |
+| Auth (NextAuth.js) | Self-hosted | Core |
+| Database (PostgreSQL + pgvector) | Self-hosted | Core |
+| AI Assistant (Ollama) | Self-hosted | Core |
+| File storage (MinIO) | Self-hosted | Core |
+| Search (Meilisearch) | Self-hosted | Core |
+| Realtime (Socket.io) | Self-hosted | Core |
+| Payments (Stripe) | External | Core |
+| Manual bank import (CSV/OFX) | Self-hosted | Core |
+
+### Phase 2 (Months 3-4): Differentiation
+
+| Feature | Stack | Status |
+|---------|-------|--------|
+| Plaid bank sync | External | **Major selling point** |
+| Smart Meeting Engine | Self-hosted | Differentiator |
+| Violation/ARC Auto-Pilot | Self-hosted | Differentiator |
+| Proactive Compliance Alerts | Self-hosted | Differentiator |
+| Web Push Notifications | Self-hosted | Enhancement |
 
 ---
 
