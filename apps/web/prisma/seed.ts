@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
@@ -18,6 +19,28 @@ async function main() {
     },
   });
   console.log(`Created community: ${community.name}`);
+
+  // Create test auth users for each role
+  const roles = ["president", "treasurer", "secretary", "board_member", "homeowner"] as const;
+  for (const role of roles) {
+    const user = await prisma.user.create({
+      data: {
+        name: `Test ${role.charAt(0).toUpperCase() + role.slice(1).replace("_", " ")}`,
+        email: `${role}@example.com`,
+        password: await bcrypt.hash("password123", 12),
+        emailVerified: new Date(),
+      },
+    });
+    await prisma.appUser.create({
+      data: {
+        authUserId: user.id,
+        communityId: community.id,
+        role,
+        isBoardMember: role !== "homeowner",
+      },
+    });
+    console.log(`Created test user: ${user.email} (${role})`);
+  }
 
   // Create homes
   const homes = await prisma.home.createMany({
