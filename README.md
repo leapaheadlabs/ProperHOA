@@ -6,81 +6,267 @@
 
 ---
 
-## The Problem
+## Quick Start
 
-Small HOAs (10–100 homes) are stuck between two bad options:
-- **Overpay** for enterprise software designed for 500+ unit communities
-- **Cobble together** spreadsheets, Facebook groups, and paper newsletters
+### Prerequisites
 
-Result: Volunteer board burnout, compliance risk, and frustrated homeowners.
+- Docker & Docker Compose
+- Git
+- Node.js 20+ (for local development)
 
-## The Solution
+### Run with Docker Compose (Recommended)
 
-ProperHOA is the first HOA platform built for the **forgotten middle** — self-managed communities that can't afford management companies but are too big for spreadsheets.
+```bash
+# Clone the repo
+git clone https://github.com/leapaheadlabs/ProperHOA.git
+cd ProperHOA
 
-### What Makes Us Different
+# Copy environment template
+cp apps/web/.env.example apps/web/.env
 
-| | ProperHOA | Everyone Else |
-|---|---|---|
-| **AI Board Assistant** | ✅ Auto-answers homeowner questions | ❌ Manual only |
-| **Smart Meeting Engine** | ✅ Auto-generates agendas, tracks votes | ❌ Basic scheduling |
-| **Violation Auto-Pilot** | ✅ Photo-based, auto-escalating workflows | ⚠️ Manual tracking |
-| **Flat Pricing** | ✅ $39–79/mo regardless of size | ❌ Per-unit gouging |
-| **Mobile-Native** | ✅ Board + Homeowner apps | ⚠️ Web-first, mobile-after |
+# Start all services
+docker-compose -f docker/docker-compose.yml up -d
 
-## Product Principles
+# Wait for services to start, then visit:
+# Web app:    http://localhost:3000
+# MinIO:      http://localhost:9001 (minioadmin/minioadmin)
+# Meilisearch: http://localhost:7700
+# Grafana:    http://localhost:3001 (admin/admin)
+```
 
-1. **Automate, Don't Just Digitize** — Every feature must reduce board workload
-2. **Mobile-First** — Board members manage on evenings/weekends from their phones
-3. **Minutes, Not Hours** — Weekly HOA workflow fits in a 10-minute session
-4. **Zero Training Required** — If it needs a tutorial, it's too complex
-5. **Community, Not Corporate** — Feels like a helpful neighbor, not enterprise software
+### Local Development
 
-## Repository Structure
+```bash
+# Install dependencies
+cd apps/web
+npm install
+
+# Set up environment
+cp .env.example .env
+# Edit .env with your values
+
+# Generate Prisma client
+npx prisma generate
+
+# Run database migrations
+npx prisma migrate dev
+
+# Start development server
+npm run dev
+```
+
+---
+
+## Architecture
+
+ProperHOA is built on a **self-hosted-first** architecture:
+
+| Layer | Technology |
+|-------|-----------|
+| **Web App** | Next.js 14 + TypeScript + Tailwind CSS |
+| **UI Components** | shadcn/ui + Radix UI + Lucide icons |
+| **Database** | PostgreSQL 16 + pgvector |
+| **Auth** | NextAuth.js v5 + PostgreSQL adapter |
+| **ORM** | Prisma |
+| **File Storage** | MinIO (S3-compatible) |
+| **Search** | Meilisearch |
+| **AI / LLM** | Ollama (self-hosted) |
+| **Realtime** | Socket.io |
+| **Cache** | Redis |
+| **Payments** | Stripe (tokenization only) |
+| **Bank Sync** | Plaid (Month 3-4) |
+| **Proxy** | Caddy (auto HTTPS) |
+| **Monitoring** | Grafana + Prometheus + Loki |
+
+### Infrastructure
+
+```
+Users
+  → Caddy (reverse proxy + HTTPS)
+  → Next.js App
+  → PostgreSQL + pgvector (data + vectors)
+  → Redis (sessions + cache)
+  → MinIO (files)
+  → Meilisearch (search)
+  → Ollama (AI inference)
+  → Stripe (payments)
+```
+
+---
+
+## Project Structure
 
 ```
 ProperHOA/
+├── apps/
+│   └── web/                    # Next.js application
+│       ├── app/                # App Router pages
+│       ├── components/         # React components
+│       ├── lib/                # Utilities, config
+│       ├── prisma/
+│       │   └── schema.prisma   # Database schema
+│       └── public/             # Static assets
+├── docker/
+│   ├── docker-compose.yml      # Full stack orchestration
+│   ├── caddy/
+│   │   └── Caddyfile           # Reverse proxy config
+│   ├── monitoring/             # Grafana, Prometheus, Loki
+│   └── init-scripts/           # Database initialization
 ├── docs/
-│   └── BRD.md              # Business Requirements Document
-├── design/                 # UX/UI assets, wireframes, Figma files
-├── architecture/           # ADRs, system diagrams, API specs
-├── mobile/                 # React Native / Flutter apps
-├── backend/                # API, database, AI services
-├── infra/                  # Terraform, Docker, k8s configs
-└── README.md               # This file
+│   └── BRD.md                  # Business Requirements
+├── architecture/               # ADR, API spec, schema, security
+├── design/                     # Design brief, flows, wireframes
+└── README.md                   # This file
 ```
 
-## Quick Links
+---
 
-- 📋 [Business Requirements Document](./docs/BRD.md)
-- 🎨 Design Brief (coming soon)
-- 🏗️ Architecture Decision Records (coming soon)
-- 📱 App Store Links (coming soon)
+## Features (MVP)
 
-## Target Market
+- ✅ **AI Board Assistant** — Self-hosted Ollama answers homeowner questions
+- ✅ **Mobile-Native** — iOS, Android, and web apps
+- ✅ **Dues & Payments** — Stripe-powered autopay and invoicing
+- ✅ **Simple Accounting** — Bank sync + reconciliation
+- ✅ **Document Hub** — CC&Rs, bylaws, minutes with full-text search
+- ✅ **Meeting Management** — Smart agendas, live meetings, auto-minutes
+- ✅ **Violation Tracking** — Photo-based reports, auto-escalation
+- ✅ **ARC Requests** — Architectural review with board voting
+- ✅ **Compliance Calendar** — Proactive deadline alerts
+- ✅ **Community Directory** — Opt-in resident contact sharing
 
-- **Primary:** Self-managed HOAs of 10–100 homes in the US
-- **TAM:** ~80,000–120,000 communities
-- **Revenue Model:** Freemium + Flat monthly SaaS ($39–79/mo)
+---
 
-## Tech Stack (TBD)
+## Tech Stack Details
 
-Pending Architecture gate. Candidates under evaluation:
-- **Mobile:** React Native vs Flutter
-- **Backend:** Node.js / Python / Go
-- **Database:** PostgreSQL + Redis
-- **AI:** OpenAI GPT-4 / Claude / Self-hosted Llama
-- **Payments:** Stripe + Plaid
-- **Infra:** AWS / GCP / Vercel
+### Frontend
+- **Next.js 14** (App Router, SSR/SSG)
+- **TypeScript** — Type-safe everywhere
+- **Tailwind CSS** — Utility-first styling
+- **shadcn/ui** — Accessible component primitives
+- **Lucide React** — Consistent iconography
 
-## Team
+### Backend
+- **Next.js API Routes** — Serverless functions
+- **Prisma ORM** — Type-safe database queries
+- **NextAuth.js v5** — Authentication with OAuth, magic links
 
-Built by [Leap Ahead Labs](https://github.com/leapaheadlabs) with OpenClaw.
+### Database
+- **PostgreSQL 16** — Relational data
+- **pgvector** — Vector embeddings for AI RAG
+- **Redis** — Sessions, cache, rate limiting
+
+### AI
+- **Ollama** — Self-hosted LLM inference
+- **Llama 3.1 8B** — Default model for Q&A
+- **nomic-embed-text** — Document embeddings
+
+### Storage & Search
+- **MinIO** — S3-compatible object storage
+- **Meilisearch** — Full-text search engine
+
+### Payments
+- **Stripe** — Card processing (PCI-compliant)
+- **Plaid** — Bank transaction sync (Month 3-4)
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [BRD](docs/BRD.md) | Business Requirements |
+| [ADR](architecture/ADR.md) | Architecture Decisions |
+| [Database Schema](architecture/database-schema.md) | PostgreSQL + pgvector schema |
+| [API Spec](architecture/api-spec.md) | REST + WebSocket API |
+| [Security Model](architecture/security-model.md) | Security architecture |
+| [Design Brief](design/DESIGN_BRIEF.md) | Visual identity, colors, typography |
+| [User Flows](design/USER_FLOWS.md) | 8 detailed user workflows |
+| [Wireframes](design/WIREFRAMES.md) | 13 screen layouts |
+| [Design System](design/DESIGN_SYSTEM.md) | Component specs, tokens |
+
+---
+
+## Environment Variables
+
+See [apps/web/.env.example](apps/web/.env.example) for all required and optional environment variables.
+
+Key variables:
+- `DATABASE_URL` — PostgreSQL connection
+- `NEXTAUTH_SECRET` — Session encryption
+- `REDIS_URL` — Redis connection
+- `MINIO_*` — Object storage credentials
+- `MEILISEARCH_*` — Search engine credentials
+- `OLLAMA_HOST` — AI inference endpoint
+- `STRIPE_*` — Payment processing
+- `PLAID_*` — Bank sync (optional for MVP)
+
+---
+
+## Development
+
+```bash
+# Install dependencies
+cd apps/web && npm install
+
+# Run Prisma Studio (database GUI)
+npx prisma studio
+
+# Generate Prisma client after schema changes
+npx prisma generate
+
+# Create migration
+npx prisma migrate dev --name your_migration_name
+
+# Run tests
+npm test
+
+# Lint
+npm run lint
+```
+
+---
+
+## Deployment
+
+### VPS (Recommended)
+
+```bash
+# On your VPS
+git clone https://github.com/leapaheadlabs/ProperHOA.git
+cd ProperHOA
+cp apps/web/.env.example apps/web/.env
+# Edit .env with production values
+docker-compose -f docker/docker-compose.yml up -d
+```
+
+### Caddy HTTPS
+
+Caddy automatically provisions Let's Encrypt certificates. Update the `Caddyfile` with your domain:
+
+```
+yourdomain.com {
+    reverse_proxy web:3000
+}
+```
+
+---
+
+## Contributing
+
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
 
 ## License
 
 TBD — Pending Product Strategy decision.
 
 ---
+
+Built by [Leap Ahead Labs](https://github.com/leapaheadlabs) with OpenClaw.
 
 *"The best HOA software is the one you forget you're using."*
