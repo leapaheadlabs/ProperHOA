@@ -170,6 +170,14 @@ ProperHOA/
 
 ---
 
+## Go-Live Status
+
+See the live [Go-Live Status Dashboard](/go-live) or read the full [Go-Live Checklist](docs/GO_LIVE.md).
+
+**Current Status**: 23/24 features complete. Ready for launch.
+
+---
+
 ## Documentation
 
 | Document | Description |
