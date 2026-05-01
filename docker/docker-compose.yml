@@ -6,6 +6,9 @@ services:
     image: pgvector/pgvector:pg16
     container_name: properhoa-postgres
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-properhoa}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-properhoa_dev_password}
@@ -28,6 +31,7 @@ services:
     image: redis:7-alpine
     container_name: properhoa-redis
     restart: unless-stopped
+    read_only: true
     command: redis-server --requirepass ${REDIS_PASSWORD:-properhoa_redis}
     volumes:
       - redis_data:/data
@@ -105,6 +109,17 @@ services:
       dockerfile: Dockerfile
     container_name: properhoa-web
     restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
     environment:
       # Database
       DATABASE_URL: postgresql://${POSTGRES_USER:-properhoa}:${POSTGRES_PASSWORD:-properhoa_dev_password}@postgres:5432/${POSTGRES_DB:-properhoa}
