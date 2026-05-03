@@ -10,7 +10,7 @@ export const POST = auth(async (req) => {
   const communityId = req.auth.user.communityId;
 
   try {
-    const { type, title, description, dueDate, recurring, recurringInterval, documentId } = await req.json();
+    const { type, title, description, dueDate, recurring, recurrenceRule } = await req.json();
 
     if (!type || !title || !dueDate) {
       return NextResponse.json({ error: "Type, title, and due date required" }, { status: 400 });
@@ -25,8 +25,7 @@ export const POST = auth(async (req) => {
         dueDate: new Date(dueDate),
         status: "upcoming",
         recurring: recurring || false,
-        recurringInterval: recurringInterval || null,
-        documentId: documentId || null,
+        recurrenceRule: recurrenceRule || null,
       },
     });
 
@@ -37,7 +36,7 @@ export const POST = auth(async (req) => {
         action: "Compliance item created",
         entityType: "compliance_item",
         entityId: item.id,
-        details: { title, type, dueDate },
+        changes: { title, type, dueDate },
       },
     });
 
@@ -63,7 +62,6 @@ export const GET = auth(async (req) => {
 
     const items = await prisma.complianceItem.findMany({
       where,
-      include: { document: true },
       orderBy: { dueDate: "asc" },
     });
 
