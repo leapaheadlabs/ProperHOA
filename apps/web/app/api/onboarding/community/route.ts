@@ -9,11 +9,11 @@ export const POST = auth(async (req) => {
   }
 
   try {
-    const { name, address, city, state, zip } = await req.json();
+    const { name, address, state } = await req.json();
 
     const slug = slugify(name) + "-" + Date.now().toString(36);
     const community = await prisma.community.create({
-      data: { name, slug, address, city, state, zip, subscriptionTier: "free" },
+      data: { name, slug, address, state },
     });
 
     await prisma.appUser.create({
@@ -21,7 +21,8 @@ export const POST = auth(async (req) => {
         authUserId: req.auth.user.id,
         communityId: community.id,
         role: "president",
-        isBoardMember: true,
+        firstName: req.auth.user.name?.split(" ")[0] || "",
+        lastName: req.auth.user.name?.split(" ").slice(1).join(" ") || "",
       },
     });
 
