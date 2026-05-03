@@ -20,15 +20,14 @@ export const POST = auth(async (req) => {
       data: {
         communityId,
         title,
-        description,
         scheduledAt: new Date(scheduledAt),
         location,
         isVirtual: isVirtual || false,
         meetingLink,
         type: type || "board",
         status: "scheduled",
-        agenda: JSON.stringify([]),
-        minutes: JSON.stringify([]),
+        agenda: [],
+        minutes: [],
         createdBy: req.auth.user.id,
       },
     });
@@ -41,7 +40,7 @@ export const POST = auth(async (req) => {
         action: "Meeting created",
         entityType: "meeting",
         entityId: meeting.id,
-        details: { title, scheduledAt },
+        changes: { title, scheduledAt },
       },
     });
 
