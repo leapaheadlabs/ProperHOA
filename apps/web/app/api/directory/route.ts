@@ -14,17 +14,17 @@ export const GET = auth(async (req) => {
     const users = await prisma.appUser.findMany({
       where: { communityId },
       include: { home: true },
-      orderBy: { createdAt: "desc" },
+      orderBy: { lastLoginAt: "desc" },
     });
 
     // Filter to only show opted-in and basic info
     const directory = users.map((u: any) => ({
       id: u.id,
-      name: u.name || "Resident",
+      name: `${u.firstName || ""} ${u.lastName || ""}`.trim() || "Resident",
       role: u.role,
       homeAddress: u.home?.address,
       homeUnit: u.home?.unitNumber,
-      isBoardMember: u.isBoardMember,
+      isBoardMember: u.role === "board" || u.role === "admin",
     }));
 
     return NextResponse.json({ directory });
