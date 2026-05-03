@@ -26,7 +26,7 @@ export const POST = auth(async (req) => {
         category,
         priority: priority || "medium",
         status: "open",
-        photos: photos ? JSON.stringify(photos) : null,
+        photos: photos ? (Array.isArray(photos) ? photos : [photos]) : [],
       },
     });
 
@@ -37,7 +37,7 @@ export const POST = auth(async (req) => {
         action: "Maintenance request submitted",
         entityType: "maintenance_request",
         entityId: request.id,
-        details: { title, category, priority },
+        changes: { title, category, priority },
       },
     });
 
@@ -58,7 +58,6 @@ export const GET = auth(async (req) => {
   try {
     const requests = await prisma.maintenanceRequest.findMany({
       where: { communityId },
-      include: { home: true },
       orderBy: { createdAt: "desc" },
     });
 
