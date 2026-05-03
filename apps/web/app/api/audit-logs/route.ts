@@ -16,7 +16,6 @@ export const GET = auth(async (req) => {
     const [logs, total] = await Promise.all([
       prisma.activityLog.findMany({
         where: { communityId },
-        include: { user: true },
         orderBy: { createdAt: "desc" },
         take: limit,
         skip: offset,
