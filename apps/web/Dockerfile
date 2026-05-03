@@ -1,9 +1,11 @@
 # Dockerfile for ProperHOA Next.js App
 FROM node:20-slim AS base
 
+# Install openssl in base so all stages have it (Prisma needs it)
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies only when needed
 FROM base AS deps
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Install dependencies
