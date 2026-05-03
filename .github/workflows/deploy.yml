@@ -11,19 +11,22 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.0.0
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
           script: |
             cd ~/ProperHOA
             git pull origin main
-            docker-compose -f docker/docker-compose.yml up -d --build web
-            docker system prune -f
-            
+            export $(cat .env | xargs)
+            cd docker
+            chmod +x deploy.sh
+            ./deploy.sh production
+
       - name: Notify Discord
         if: always()
         uses: sarisia/actions-status-discord@v1
