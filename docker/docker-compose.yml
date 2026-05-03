@@ -69,7 +69,7 @@ services:
 
   # Meilisearch Full-Text Search
   meilisearch:
-    image: getmeilisearch/meilisearch:latest
+    image: getmeili/meilisearch:latest
     container_name: properhoa-meilisearch
     restart: unless-stopped
     environment:
