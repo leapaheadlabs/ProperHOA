@@ -10,7 +10,7 @@ const EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "nomic-embed-text"
 async function checkRateLimit(communityId: string): Promise<boolean> {
   const community = await prisma.community.findUnique({
     where: { id: communityId },
-    select: { subscriptionTier: true },
+    select: { plan: true },
   });
 
   const limits: Record<string, number> = {
@@ -20,7 +20,7 @@ async function checkRateLimit(communityId: string): Promise<boolean> {
     enterprise: 5000,
   };
 
-  const limit = limits[community?.subscriptionTier || "free"];
+  const limit = limits[community?.plan || "free"];
 
   // Count today's requests
   const today = new Date();
