@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+function toNumber(val: any): number {
+  if (val === null || val === undefined) return 0;
+  return typeof val === "number" ? val : Number(val);
+}
+
 export const GET = auth(async (req) => {
   if (!req.auth?.user?.communityId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -21,7 +26,9 @@ export const GET = auth(async (req) => {
       _sum: { amount: true },
     });
 
-    const balance = (totalRevenue._sum.amount || 0) + (totalExpenses._sum.amount || 0);
+    const revenue = toNumber(totalRevenue._sum.amount);
+    const expenses = toNumber(totalExpenses._sum.amount);
+    const balance = revenue + expenses;
 
     // Monthly data for charts
     const transactions = await prisma.transaction.findMany({
@@ -42,12 +49,11 @@ export const GET = auth(async (req) => {
       where: { communityId },
       orderBy: { date: "desc" },
       take: 20,
-      include: { invoice: true, bankAccount: true },
     });
 
     // Unreconciled count
     const unreconciled = await prisma.transaction.count({
-      where: { communityId, isReconciled: false },
+      where: { communityId, reconciled: false },
     });
 
     // Bank accounts
@@ -58,15 +64,15 @@ export const GET = auth(async (req) => {
     return NextResponse.json({
       stats: {
         balance,
-        revenue: totalRevenue._sum.amount || 0,
-        expenses: Math.abs(totalExpenses._sum.amount || 0),
-        net: (totalRevenue._sum.amount || 0) + (totalExpenses._sum.amount || 0),
+        revenue,
+        expenses: Math.abs(expenses),
+        net: balance,
         unreconciled,
       },
       transactions: transactions.reverse(),
       categories: categories.map((c: any) => ({
         name: c.category || "Uncategorized",
-        amount: Math.abs(c._sum.amount || 0),
+        amount: Math.abs(toNumber(c._sum.amount)),
       })),
       recent,
       bankAccounts,
