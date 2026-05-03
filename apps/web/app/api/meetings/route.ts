@@ -10,7 +10,7 @@ export const POST = auth(async (req) => {
   const communityId = req.auth.user.communityId;
 
   try {
-    const { title, description, scheduledAt, location, isVirtual, meetingLink, type } = await req.json();
+    const { title, description, scheduledAt, location, type } = await req.json();
 
     if (!title || !scheduledAt) {
       return NextResponse.json({ error: "Title and date required" }, { status: 400 });
@@ -22,12 +22,10 @@ export const POST = auth(async (req) => {
         title,
         scheduledAt: new Date(scheduledAt),
         location,
-        isVirtual: isVirtual || false,
-        meetingLink,
         type: type || "board",
         status: "scheduled",
-        agenda: "[]",
-        minutes: "[]",
+        agenda: [],
+        minutes: "",
         createdBy: req.auth.user.id,
       },
     });
