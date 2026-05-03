@@ -194,6 +194,7 @@ model DocumentChunk {
   // Use Prisma.$queryRaw for vector operations
 
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  community Community @relation(fields: [communityId], references: [id])
 
   @@index([documentId])
   @@map("document_chunks")
@@ -502,6 +503,8 @@ model ActivityLog {
   ipAddress   String?   @map("ip_address") @db.Inet
   userAgent   String?   @map("user_agent")
   createdAt   DateTime  @default(now()) @map("created_at")
+
+  community Community @relation(fields: [communityId], references: [id])
 
   @@index([communityId, createdAt])
   @@index([action])
