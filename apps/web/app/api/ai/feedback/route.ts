@@ -21,24 +21,16 @@ export const POST = auth(async (req) => {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const messages = JSON.parse(chatSession.messages || "[]");
+    const messages = Array.isArray(chatSession.messages) ? (chatSession.messages as any[]) : [];
     if (messages[messageIndex]) {
       messages[messageIndex].feedback = type;
     }
 
-    // Build feedback entry
-    const feedback = JSON.parse(chatSession.feedback || "[]");
-    feedback.push({
-      messageIndex,
-      type,
-      timestamp: new Date().toISOString(),
-    });
-
     await prisma.chatSession.update({
       where: { id: sessionId },
       data: {
-        messages: JSON.stringify(messages),
-        feedback: JSON.stringify(feedback),
+        messages: messages as any,
+        feedbackRating: type === "up" ? 1 : type === "down" ? -1 : 0,
       },
     });
 
