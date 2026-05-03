@@ -15,6 +15,10 @@ RUN npm install
 # Rebuild the source code only when needed
 FROM base AS builder
 WORKDIR /app
+
+# Provide a dummy DATABASE_URL for Prisma during build
+ENV DATABASE_URL="postgresql://postgres:postgres@localhost:5432/properhoa"
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
