@@ -36,7 +36,7 @@ export const PATCH = auth(async (req, ctx) => {
     if (status === "completed") {
       // Auto-create action items from agenda
       const agendaItems = updated.agenda
-        ? (JSON.parse(updated.agenda) as any[])
+        ? (updated.agenda as any[])
         : [];
       for (const item of agendaItems) {
         if (item && item.actionRequired) {
