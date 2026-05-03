@@ -26,8 +26,8 @@ export const POST = auth(async (req) => {
         meetingLink,
         type: type || "board",
         status: "scheduled",
-        agenda: [],
-        minutes: [],
+        agenda: "[]",
+        minutes: "[]",
         createdBy: req.auth.user.id,
       },
     });
