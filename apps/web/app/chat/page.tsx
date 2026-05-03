@@ -8,6 +8,9 @@ import { AIChatBubble } from "@/components/custom/ai-chat-bubble";
 import { Card } from "@/components/ui/card";
 import { Sparkles, Send, Loader2, AlertCircle } from "lucide-react";
 
+// Prevent static generation of this client-only page
+export const dynamic = "force-dynamic";
+
 interface Message {
   role: "user" | "assistant";
   content: string;
