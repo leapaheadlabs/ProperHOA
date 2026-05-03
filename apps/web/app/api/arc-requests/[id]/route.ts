@@ -23,15 +23,15 @@ export const PATCH = auth(async (req, ctx) => {
       return NextResponse.json({ error: "ARC request not found" }, { status: 404 });
     }
 
-    const boardVote = JSON.parse(arc.boardVote || "[]");
-    const existingVote = boardVote.find((v: any) => v.userId === userId);
+    const votes = Array.isArray(arc.votes) ? (arc.votes as any[]) : [];
+    const existingVote = votes.find((v: any) => v.userId === userId);
 
     if (existingVote) {
       existingVote.vote = vote;
       existingVote.conditions = conditions;
       existingVote.updatedAt = new Date().toISOString();
     } else {
-      boardVote.push({
+      votes.push({
         userId,
         vote,
         conditions,
@@ -41,11 +41,11 @@ export const PATCH = auth(async (req, ctx) => {
 
     // Check if majority reached
     const totalBoard = await prisma.appUser.count({
-      where: { communityId, isBoardMember: true },
+      where: { communityId, role: { in: ["board", "admin"] } },
     });
 
-    const approveCount = boardVote.filter((v: any) => v.vote === "approve").length;
-    const denyCount = boardVote.filter((v: any) => v.vote === "deny").length;
+    const approveCount = votes.filter((v: any) => v.vote === "approve").length;
+    const denyCount = votes.filter((v: any) => v.vote === "deny").length;
     const majority = Math.floor(totalBoard / 2) + 1;
 
     let newStatus = arc.status;
@@ -58,10 +58,12 @@ export const PATCH = auth(async (req, ctx) => {
     const updated = await prisma.arcRequest.update({
       where: { id: arcId },
       data: {
-        boardVote: JSON.stringify(boardVote),
+        votes: votes as any,
         status: newStatus,
-        decisionNotes: conditions,
-        decidedAt: newStatus !== "pending" ? new Date() : null,
+        conditions: conditions || arc.conditions,
+        approvedAt: newStatus === "approved" ? new Date() : arc.approvedAt,
+        approvedBy: newStatus === "approved" ? userId : arc.approvedBy,
+        denialReason: newStatus === "denied" ? conditions : arc.denialReason,
       },
     });
 
