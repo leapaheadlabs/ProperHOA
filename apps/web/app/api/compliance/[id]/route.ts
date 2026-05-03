@@ -38,18 +38,17 @@ export const PATCH = auth(async (req, ctx) => {
     });
 
     // If recurring and completed, create next instance
-    if (status === "completed" && item.recurring && item.recurringInterval) {
+    if (status === "completed" && item.recurring && item.recurrenceRule) {
       const nextDue = new Date(item.dueDate);
-      switch (item.recurringInterval) {
-        case "monthly":
-          nextDue.setMonth(nextDue.getMonth() + 1);
-          break;
-        case "quarterly":
-          nextDue.setMonth(nextDue.getMonth() + 3);
-          break;
-        case "annually":
-          nextDue.setFullYear(nextDue.getFullYear() + 1);
-          break;
+      const rule = item.recurrenceRule.toLowerCase();
+      if (rule.includes("month")) {
+        nextDue.setMonth(nextDue.getMonth() + 1);
+      } else if (rule.includes("quarter")) {
+        nextDue.setMonth(nextDue.getMonth() + 3);
+      } else if (rule.includes("year") || rule.includes("annual")) {
+        nextDue.setFullYear(nextDue.getFullYear() + 1);
+      } else {
+        nextDue.setMonth(nextDue.getMonth() + 1);
       }
 
       await prisma.complianceItem.create({
@@ -61,7 +60,7 @@ export const PATCH = auth(async (req, ctx) => {
           dueDate: nextDue,
           status: "upcoming",
           recurring: true,
-          recurringInterval: item.recurringInterval,
+          recurrenceRule: item.recurrenceRule,
         },
       });
     }
