@@ -24,8 +24,8 @@ export const PATCH = auth(async (req, ctx) => {
 
     const updateData: any = {};
     if (status) updateData.status = status;
-    if (agenda) updateData.agenda = agenda;
-    if (minutes) updateData.minutes = minutes;
+    if (agenda) updateData.agenda = JSON.stringify(agenda);
+    if (minutes) updateData.minutes = JSON.stringify(minutes);
     updateData.updatedAt = new Date();
 
     const updated = await prisma.meeting.update({
@@ -35,8 +35,8 @@ export const PATCH = auth(async (req, ctx) => {
 
     if (status === "completed") {
       // Auto-create action items from agenda
-      const agendaItems = Array.isArray(updated.agenda)
-        ? (updated.agenda as any[])
+      const agendaItems = updated.agenda
+        ? (JSON.parse(updated.agenda) as any[])
         : [];
       for (const item of agendaItems) {
         if (item && item.actionRequired) {
