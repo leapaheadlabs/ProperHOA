@@ -10,20 +10,17 @@ import { EmptyState } from "@/components/custom/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DollarSign, TrendingUp, TrendingDown, Wallet, AlertCircle, Download, Upload } from "lucide-react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 
-// Import recharts components
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-} from "recharts";
+const MonthlyBarChart = dynamic(
+  () => import("./chart-components").then((m) => m.MonthlyBarChart),
+  { ssr: false }
+);
+
+const CategoryPieChart = dynamic(
+  () => import("./chart-components").then((m) => m.CategoryPieChart),
+  { ssr: false }
+);
 
 export default async function FinancesPage() {
   const session = await auth();
@@ -93,8 +90,6 @@ export default async function FinancesPage() {
     revenue: data.revenue,
     expenses: data.expenses,
   }));
-
-  const COLORS = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"];
 
   return (
     <div className="container mx-auto max-w-6xl px-4 py-6 space-y-6">
@@ -174,16 +169,7 @@ export default async function FinancesPage() {
             {chartData.length === 0 ? (
               <EmptyState icon={DollarSign} title="No data" description="Import transactions to see charts." />
             ) : (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip formatter={(value: number) => `$${value.toFixed(2)}`} />
-                  <Bar dataKey="revenue" fill="#22c55e" />
-                  <Bar dataKey="expenses" fill="#ef4444" />
-                </BarChart>
-              </ResponsiveContainer>
+              <MonthlyBarChart data={chartData} />
             )}
           </CardContent>
         </Card>
@@ -196,28 +182,7 @@ export default async function FinancesPage() {
             {categories.length === 0 ? (
               <EmptyState icon={DollarSign} title="No categories" description="Categorize transactions to see breakdown." />
             ) : (
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={categories.map((c: any) => ({
-                      name: c.category || "Uncategorized",
-                      value: Math.abs(c._sum.amount || 0),
-                    }))}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    dataKey="value"
-                    label
-                  >
-                    {categories.map((_: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number) => `$${value.toFixed(2)}`} />
-                </PieChart>
-              </ResponsiveContainer>
+              <CategoryPieChart categories={categories} />
             )}
           </CardContent>
         </Card>
