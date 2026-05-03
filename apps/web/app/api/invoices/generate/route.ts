@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { randomUUID } from "crypto";
 
 export const POST = auth(async (req) => {
-  if (!req.auth?.user?.role || !["president", "treasurer"].includes(req.auth.user.role)) {
+  if (!req.auth?.user?.role || !["board", "admin"].includes(req.auth.user.role)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -23,18 +24,23 @@ export const POST = auth(async (req) => {
       where: { communityId },
     });
 
+    const now = new Date();
+    const due = new Date(dueDate);
+
     // Create invoices for all homes
     const invoices = await Promise.all(
-      homes.map((home: any) =>
+      homes.map((home: any, idx: number) =>
         prisma.invoice.create({
           data: {
             communityId,
             homeId: home.id,
+            invoiceNumber: `INV-${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}-${String(idx+1).padStart(4,'0')}`,
             amount,
+            balanceDue: amount,
             description,
-            dueDate: new Date(dueDate),
-            status: "sent",
-            createdBy: req.auth!.user.id,
+            issuedAt: now,
+            dueAt: due,
+            status: "outstanding",
           },
         })
       )
@@ -48,7 +54,7 @@ export const POST = auth(async (req) => {
         action: `Generated ${invoices.length} invoices`,
         entityType: "invoice",
         entityId: "batch",
-        details: { amount, description, count: invoices.length },
+        changes: { amount, description, count: invoices.length },
       },
     });
 
