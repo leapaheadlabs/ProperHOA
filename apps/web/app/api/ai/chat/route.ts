@@ -142,13 +142,14 @@ Guidelines:
         data: {
           communityId,
           userId,
-          messages: JSON.stringify([]),
+          sessionType: "general",
+          messages: [],
         },
       });
     }
 
-    // Parse existing messages
-    const messages = JSON.parse(chatSession.messages || "[]");
+    // Parse existing messages - Prisma Json field returns parsed value
+    const messages = Array.isArray(chatSession.messages) ? (chatSession.messages as any[]) : [];
     messages.push({ role: "user", content: message, timestamp: new Date().toISOString() });
 
     // Stream response to client while collecting it
@@ -180,7 +181,7 @@ Guidelines:
                   await prisma.chatSession.update({
                     where: { id: chatSession!.id },
                     data: {
-                      messages: JSON.stringify(messages),
+                      messages: messages as any,
                       updatedAt: new Date(),
                     },
                   });
