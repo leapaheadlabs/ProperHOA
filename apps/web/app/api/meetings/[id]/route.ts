@@ -35,7 +35,9 @@ export const PATCH = auth(async (req, ctx) => {
 
     if (status === "completed") {
       // Auto-create action items from agenda
-      const agendaItems = Array.isArray(updated.agenda) ? updated.agenda : [];
+      const agendaItems = Array.isArray(updated.agenda)
+        ? (updated.agenda as any[])
+        : [];
       for (const item of agendaItems) {
         if (item && item.actionRequired) {
           await prisma.complianceItem.create({
