@@ -32,7 +32,7 @@ export const POST = auth(async (req) => {
         action: "AI question escalated to board",
         entityType: "chat_session",
         entityId: sessionId,
-        details: JSON.parse(chatSession.messages || "[]"),
+        changes: Array.isArray(chatSession.messages) ? (chatSession.messages as any[]) : [],
       },
     });
 
