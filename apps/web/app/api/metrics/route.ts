@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+// Prevent static generation — this route needs a live DB
+export const dynamic = "force-dynamic";
+
 // Simple Prometheus-style metrics endpoint
 export const GET = async () => {
   const timestamp = Date.now();
