@@ -45,7 +45,7 @@ export const PATCH = auth(async (req, ctx) => {
               communityId,
               type: "annual_meeting",
               title: item.title || "Action item",
-              dueBy: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+              dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
               status: "upcoming",
             },
           });
