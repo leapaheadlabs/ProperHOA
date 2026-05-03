@@ -60,12 +60,12 @@ export const POST = auth(async (req) => {
         communityId,
         title,
         type,
-        minioKey: key,
+        filePath: key,
         fileSize: buffer.length,
         mimeType: file.type,
         contentText: contentText || null,
         isPublic,
-        createdBy: req.auth.user.id,
+        uploadedBy: req.auth.user.id,
       },
     });
 
@@ -80,7 +80,7 @@ export const POST = auth(async (req) => {
         action: "Document uploaded",
         entityType: "document",
         entityId: document.id,
-        details: { title, type, size: buffer.length },
+        changes: { title, type, size: buffer.length },
       },
     });
 
@@ -116,7 +116,7 @@ export const GET = auth(async (req) => {
       documents.map(async (doc: any) => {
         const url = await getSignedUrl(
           s3,
-          new GetObjectCommand({ Bucket: BUCKET, Key: doc.minioKey }),
+          new GetObjectCommand({ Bucket: BUCKET, Key: doc.filePath }),
           { expiresIn: 3600 }
         );
         return { ...doc, downloadUrl: url };
