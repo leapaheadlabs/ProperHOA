@@ -9,6 +9,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp:noexec,nosuid,size=100m
+      - /var/run/postgresql
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-properhoa}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-properhoa_dev_password}
