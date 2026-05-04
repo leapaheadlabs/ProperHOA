@@ -14,6 +14,8 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ['@aws-sdk/client-s3'],
   },
+  // Output standalone build for Docker
+  output: 'standalone',
   // Temporarily ignore type errors to get deployed; fix types properly after launch
   typescript: {
     ignoreBuildErrors: true,
